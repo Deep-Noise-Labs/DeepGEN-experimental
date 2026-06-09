@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data and checkpoints (large files)
+data/
+checkpoints/
+*.pt
+*.ckpt
+*.safetensors
+
+# Logs
+*.log
+wandb/
+runs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ONNX exports
+*.onnx
+
+# Audio outputs
+output/
+*.wav
+*.mp3
+*.flac
