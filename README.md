@@ -62,24 +62,33 @@ synthgen-experimental/
 │   ├── TRAINING.md      # Training guidelines
 │   └── TRITON_INFERENCE.md  # Triton deployment guide
 ├── configs/             # Configuration files
-├── requirements.txt     # Python dependencies
-└── pyproject.toml       # Project metadata
+├── uv.lock              # Reproducible dependency lockfile
+├── pyproject.toml       # Project metadata and uv configuration
 ```
 
 ## Quick Start
 
+This project uses [`uv`](https://github.com/astral-sh/uv) as the primary Python package and project manager.
+
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# 1. Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Download datasets
-python -m synthgen.data.download --dataset all --output-dir ./data
+# 2. Install dependencies and setup environment
+# For CPU-only environments (e.g., CI/CD, local testing)
+uv sync --all-extras
 
-# Train the model (see docs/TRAINING.md for full guide)
-python -m synthgen.training.trainer --config configs/default.yaml
+# For GPU environments (CUDA 12.1)
+uv sync --all-extras --index "https://download.pytorch.org/whl/cu121"
 
-# Generate audio
-python -m synthgen.inference.generate --prompt "warm analog pad with slow attack and reverb" --duration 8.0
+# 3. Download datasets
+uv run synthgen-download --dataset all --output-dir ./data
+
+# 4. Train the model (see docs/TRAINING.md for full guide)
+uv run synthgen-train --config configs/default.yaml
+
+# 5. Generate audio
+uv run synthgen-generate --prompt "warm analog pad with slow attack and reverb" --duration 8.0
 ```
 
 ## Datasets

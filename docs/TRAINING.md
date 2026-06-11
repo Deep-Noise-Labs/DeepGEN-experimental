@@ -23,11 +23,11 @@ Before beginning the training process, you must acquire and prepare the datasets
    
    ```bash
    # Download specific datasets
-   python -m synthgen.data.download --dataset audiocaps --output-dir ./data
-   python -m synthgen.data.download --dataset nsynth --output-dir ./data
+   uv run synthgen-download --dataset audiocaps --output-dir ./data
+   uv run synthgen-download --dataset nsynth --output-dir ./data
    
    # Or download all available datasets (requires significant time and storage)
-   python -m synthgen.data.download --dataset all --output-dir ./data
+   uv run synthgen-download --dataset all --output-dir ./data
    ```
 
 2. **Verify Data**: The dataset loader automatically handles resampling to 44.1 kHz, stereo conversion, and amplitude normalization during the training loop. No manual pre-processing is required.
@@ -61,10 +61,10 @@ Launch the training script:
 
 ```bash
 # Single GPU
-python -m synthgen.training.trainer --config configs/vae_train.yaml
+uv run synthgen-train --config configs/vae_train.yaml
 
 # Multi-GPU (e.g., 4 GPUs)
-torchrun --nproc_per_node=4 -m synthgen.training.trainer --config configs/vae_train.yaml
+uv run torchrun --nproc_per_node=4 -m synthgen.training.trainer --config configs/vae_train.yaml
 ```
 
 ### Evaluation
@@ -100,10 +100,10 @@ Launch the training script:
 
 ```bash
 # Single GPU
-python -m synthgen.training.trainer --config configs/dit_train.yaml
+uv run synthgen-train --config configs/dit_train.yaml
 
 # Multi-GPU (e.g., 8 GPUs)
-torchrun --nproc_per_node=8 -m synthgen.training.trainer --config configs/dit_train.yaml
+uv run torchrun --nproc_per_node=8 -m synthgen.training.trainer --config configs/dit_train.yaml
 ```
 
 ### Classifier-Free Guidance (CFG) Dropout
@@ -123,7 +123,7 @@ The training loop implements CFG dropout by randomly replacing the text conditio
 We strongly recommend implementing automated integrity checks to ensure the data pipeline and model architectures remain functional during development. You can run the test suite to verify the components:
 
 ```bash
-pytest tests/
+uv run pytest tests/
 ```
 
 This will validate the tensor shapes, loss computations, and dataset loading mechanisms.

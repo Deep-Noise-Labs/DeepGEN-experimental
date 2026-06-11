@@ -1,22 +1,21 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "synthgen"
 version = "0.1.0"
 description = "Text-to-sample generation model for short synth sounds and instrument samples"
 readme = "README.md"
-license = {text = "MIT"}
+license = { text = "MIT" }
 requires-python = ">=3.10"
-authors = [
-    {name = "SynthGen Team"},
-]
+authors = [{ name = "SynthGen Team" }]
 
 dependencies = [
     "torch>=2.1.0",
     "torchaudio>=2.1.0",
     "transformers>=4.36.0",
+    "tokenizers>=0.15.0",
     "numpy>=1.24.0",
     "soundfile>=0.12.0",
     "librosa>=0.10.0",
@@ -30,14 +29,53 @@ train = [
     "wandb>=0.16.0",
     "tensorboard>=2.14.0",
 ]
-dev = [
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "ruff>=0.1.0",
-]
 download = [
     "yt-dlp>=2023.10.0",
 ]
+
+[project.scripts]
+synthgen-train    = "synthgen.training.trainer:main"
+synthgen-generate = "synthgen.inference.generate:main"
+synthgen-download = "synthgen.data.download:main"
+
+# ---------------------------------------------------------------------------
+# Dependency groups (PEP 735 / uv native)
+# ---------------------------------------------------------------------------
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.4.0",
+]
+
+# ---------------------------------------------------------------------------
+# uv configuration
+# ---------------------------------------------------------------------------
+
+[tool.uv]
+# Use PyTorch CPU index for CI / machines without CUDA.
+# On GPU machines, override by running:
+#   uv sync --extra train --index "https://download.pytorch.org/whl/cu121"
+# or set TORCH_INDEX env var (see docs/TRAINING.md).
+default-groups = ["dev"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
+torchaudio = [
+    { index = "pytorch-cpu", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
+
+# ---------------------------------------------------------------------------
+# Tool configuration
+# ---------------------------------------------------------------------------
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -48,3 +86,17 @@ python_functions = ["test_*"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["synthgen"]
+
+[tool.coverage.run]
+source = ["synthgen"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
