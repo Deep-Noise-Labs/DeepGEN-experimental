@@ -33,9 +33,16 @@ checkpoint_dir: "./checkpoints"
 save_every_steps: 5000
 resume_from: null
 
-# Logging
+# Logging / experiment tracking (ClearML is primary)
 log_every_steps: 100
 eval_every_steps: 2500
+use_clearml: false
+clearml_project: "synthgen"
+clearml_task_name: null
+clearml_tags: []
+clearml_dataset_name: "synthgen-data"
+clearml_register_dataset: true
+clearml_upload_checkpoints: false
 use_wandb: false
 wandb_project: "synthgen"
 

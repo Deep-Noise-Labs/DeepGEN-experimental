@@ -18,6 +18,7 @@ env/
 .idea/
 *.swp
 *.swo
+.cursor/
 
 # Data and checkpoints (large files)
 data/
@@ -26,10 +27,12 @@ checkpoints/
 *.ckpt
 *.safetensors
 
-# Logs
+# Logs / experiment tracking
 *.log
 wandb/
 runs/
+clearml.conf
+**/clearml.conf
 
 # OS
 .DS_Store

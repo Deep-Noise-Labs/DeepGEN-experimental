@@ -7,7 +7,7 @@ Supports:
 - Gradient accumulation
 - Distributed training via PyTorch DDP
 - Checkpointing and resumption
-- Weights & Biases logging
+- ClearML experiment tracking (primary) and optional Weights & Biases
 """
 
 import argparse
@@ -15,18 +15,20 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 import torch
 import torch.distributed as dist
-import torch.nn as nn
 from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 
-from synthgen.data.dataset import AudioTextDataset, SynthGenCollator
 from synthgen.model.synthgen import SynthGen
 from synthgen.model.vae import AudioVAE
+from synthgen.tracking import build_tracker
+from synthgen.tracking.dataset_registry import register_dataset_metadata
+from synthgen.tracking.null import NullTracker
+from synthgen.tracking.tracker import ExperimentTracker, config_as_dict, get_clearml_task
 from synthgen.training.losses import FlowMatchingLoss, VAELoss
 from synthgen.training.scheduler import WarmupCosineScheduler
 
@@ -69,11 +71,18 @@ class TrainingConfig:
     # Checkpointing
     checkpoint_dir: str = "./checkpoints"
     save_every_steps: int = 5000
-    resume_from: Optional[str] = None
+    resume_from: str | None = None
 
-    # Logging
+    # Logging / experiment tracking
     log_every_steps: int = 100
     eval_every_steps: int = 2500
+    use_clearml: bool = False
+    clearml_project: str = "synthgen"
+    clearml_task_name: str | None = None
+    clearml_tags: list | None = None
+    clearml_dataset_name: str = "synthgen-data"
+    clearml_register_dataset: bool = True
+    clearml_upload_checkpoints: bool = False
     use_wandb: bool = False
     wandb_project: str = "synthgen"
 
@@ -88,13 +97,18 @@ class TrainingConfig:
     def from_yaml(cls, path: str) -> "TrainingConfig":
         """Load config from YAML file."""
         import yaml
+
         config = cls()
-        with open(path, "r") as f:
-            data = yaml.safe_load(f)
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
         for key, value in data.items():
             if hasattr(config, key):
                 setattr(config, key, value)
         return config
+
+    def as_dict(self) -> dict[str, Any]:
+        """Serialize config fields for checkpointing and trackers."""
+        return config_as_dict(self)
 
 
 # =============================================================================
@@ -111,10 +125,14 @@ class SynthGenTrainer:
     - Data loading
     - Optimization
     - Checkpointing
-    - Logging
+    - Experiment logging (ClearML primary, WandB optional)
     """
 
-    def __init__(self, config: TrainingConfig):
+    def __init__(
+        self,
+        config: TrainingConfig,
+        tracker: ExperimentTracker | None = None,
+    ):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.global_step = 0
@@ -125,6 +143,14 @@ class SynthGenTrainer:
         self.world_size = 1
         if config.distributed:
             self._setup_distributed()
+
+        # Experiment tracker as early as possible after rank is known
+        self.tracker: ExperimentTracker = (
+            tracker if tracker is not None else build_tracker(config, rank=self.rank)
+        )
+        self._register_dataset_metadata()
+        if not isinstance(self.tracker, NullTracker):
+            self.tracker.log_artifact_json("training_config", config.as_dict())
 
         # Initialize model
         self._init_model()
@@ -147,10 +173,19 @@ class SynthGenTrainer:
         if config.resume_from:
             self._load_checkpoint(config.resume_from)
 
-        # Wandb
-        if config.use_wandb and self.rank == 0:
-            import wandb
-            wandb.init(project=config.wandb_project, config=vars(config))
+    def _register_dataset_metadata(self) -> None:
+        """Attach metadata-only dataset lineage to ClearML (no media upload)."""
+        if self.rank != 0 or not self.config.use_clearml:
+            return
+        if not self.config.clearml_register_dataset:
+            return
+        task = get_clearml_task(self.tracker)
+        register_dataset_metadata(
+            data_dir=self.config.data_dir,
+            dataset_name=self.config.clearml_dataset_name,
+            dataset_project=self.config.clearml_project,
+            task=task,
+        )
 
     def _setup_distributed(self):
         """Initialize distributed training."""
@@ -192,6 +227,12 @@ class SynthGenTrainer:
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         logger.info(f"Total parameters: {total_params:,}")
         logger.info(f"Trainable parameters: {trainable_params:,}")
+        self.tracker.log_params(
+            {
+                "total_parameters": total_params,
+                "trainable_parameters": trainable_params,
+            }
+        )
 
     def _init_optimizer(self):
         """Initialize optimizer and learning rate scheduler."""
@@ -217,6 +258,8 @@ class SynthGenTrainer:
 
     def _init_data(self):
         """Initialize data loaders."""
+        from synthgen.data.dataset import AudioTextDataset, SynthGenCollator
+
         config = self.config
 
         dataset = AudioTextDataset(
@@ -249,6 +292,30 @@ class SynthGenTrainer:
         else:
             self.loss_fn = FlowMatchingLoss(weighting="min_snr")
 
+    @staticmethod
+    def _scalar_metrics(
+        accumulated_loss: float,
+        losses: dict[str, Any],
+        lr: float,
+        steps_per_sec: float,
+        epoch: int,
+    ) -> dict[str, float]:
+        """Build the metric dict logged each log_every_steps."""
+        metrics: dict[str, float] = {
+            "loss": float(accumulated_loss),
+            "learning_rate": float(lr),
+            "steps_per_second": float(steps_per_sec),
+            "epoch": float(epoch),
+        }
+        for key, value in losses.items():
+            if key == "loss":
+                continue
+            if torch.is_tensor(value):
+                metrics[key] = float(value.detach().item())
+            else:
+                metrics[key] = float(value)
+        return metrics
+
     def train(self):
         """Main training loop."""
         config = self.config
@@ -258,98 +325,103 @@ class SynthGenTrainer:
         data_iter = iter(self.dataloader)
         accumulated_loss = 0.0
         step_start_time = time.time()
+        last_losses: dict[str, Any] = {}
 
-        while self.global_step < config.max_steps:
-            # Get batch
-            try:
-                batch = next(data_iter)
-            except StopIteration:
-                self.epoch += 1
-                if config.distributed:
-                    self.dataloader.sampler.set_epoch(self.epoch)
-                data_iter = iter(self.dataloader)
-                batch = next(data_iter)
+        try:
+            while self.global_step < config.max_steps:
+                # Get batch
+                try:
+                    batch = next(data_iter)
+                except StopIteration:
+                    self.epoch += 1
+                    if config.distributed:
+                        self.dataloader.sampler.set_epoch(self.epoch)
+                    data_iter = iter(self.dataloader)
+                    batch = next(data_iter)
 
-            # Move to device
-            audio = batch["audio"].to(self.device)
-            captions = batch["captions"]
-            durations = batch["durations"].to(self.device)
+                # Move to device
+                audio = batch["audio"].to(self.device)
+                captions = batch["captions"]
+                durations = batch["durations"].to(self.device)
 
-            # Forward pass with mixed precision
-            amp_dtype = {
-                "bf16": torch.bfloat16,
-                "fp16": torch.float16,
-                "no": None,
-            }[config.mixed_precision]
+                # Forward pass with mixed precision
+                amp_dtype = {
+                    "bf16": torch.bfloat16,
+                    "fp16": torch.float16,
+                    "no": None,
+                }[config.mixed_precision]
 
-            with autocast(dtype=amp_dtype, enabled=(amp_dtype is not None)):
-                if config.stage == "vae":
-                    reconstruction, target, mean, log_var = self.model(audio)
-                    losses = self.loss_fn(reconstruction, target, mean, log_var)
-                else:
-                    losses = self.model.compute_loss(audio, captions, durations)
+                with autocast(dtype=amp_dtype, enabled=(amp_dtype is not None)):
+                    if config.stage == "vae":
+                        reconstruction, target, mean, log_var = self.model(audio)
+                        losses = self.loss_fn(reconstruction, target, mean, log_var)
+                    else:
+                        losses = self.model.compute_loss(audio, captions, durations)
 
-            loss = losses["loss"] / config.gradient_accumulation_steps
+                last_losses = losses
+                loss = losses["loss"] / config.gradient_accumulation_steps
 
-            # Backward pass
-            if self.scaler:
-                self.scaler.scale(loss).backward()
-            else:
-                loss.backward()
-
-            accumulated_loss += loss.item()
-
-            # Optimizer step (with gradient accumulation)
-            if (self.global_step + 1) % config.gradient_accumulation_steps == 0:
+                # Backward pass
                 if self.scaler:
-                    self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), max_norm=1.0
-                    )
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
+                    self.scaler.scale(loss).backward()
                 else:
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), max_norm=1.0
+                    loss.backward()
+
+                accumulated_loss += loss.item()
+
+                # Optimizer step (with gradient accumulation)
+                if (self.global_step + 1) % config.gradient_accumulation_steps == 0:
+                    if self.scaler:
+                        self.scaler.unscale_(self.optimizer)
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), max_norm=1.0
+                        )
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                    else:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), max_norm=1.0
+                        )
+                        self.optimizer.step()
+
+                    self.scheduler.step()
+                    self.optimizer.zero_grad()
+
+                self.global_step += 1
+
+                # Logging
+                if self.global_step % config.log_every_steps == 0 and self.rank == 0:
+                    elapsed = time.time() - step_start_time
+                    steps_per_sec = config.log_every_steps / elapsed
+                    lr = self.scheduler.get_lr()[0]
+
+                    log_msg = (
+                        f"Step {self.global_step}/{config.max_steps} | "
+                        f"Loss: {accumulated_loss:.4f} | "
+                        f"LR: {lr:.2e} | "
+                        f"Steps/s: {steps_per_sec:.2f}"
                     )
-                    self.optimizer.step()
+                    logger.info(log_msg)
 
-                self.scheduler.step()
-                self.optimizer.zero_grad()
+                    metrics = self._scalar_metrics(
+                        accumulated_loss=accumulated_loss,
+                        losses=last_losses,
+                        lr=lr,
+                        steps_per_sec=steps_per_sec,
+                        epoch=self.epoch,
+                    )
+                    self.tracker.log_metrics(metrics, step=self.global_step)
 
-            self.global_step += 1
+                    accumulated_loss = 0.0
+                    step_start_time = time.time()
 
-            # Logging
-            if self.global_step % config.log_every_steps == 0 and self.rank == 0:
-                elapsed = time.time() - step_start_time
-                steps_per_sec = config.log_every_steps / elapsed
-                lr = self.scheduler.get_lr()[0]
+                # Save checkpoint
+                if self.global_step % config.save_every_steps == 0 and self.rank == 0:
+                    self._save_checkpoint()
 
-                log_msg = (
-                    f"Step {self.global_step}/{config.max_steps} | "
-                    f"Loss: {accumulated_loss:.4f} | "
-                    f"LR: {lr:.2e} | "
-                    f"Steps/s: {steps_per_sec:.2f}"
-                )
-                logger.info(log_msg)
-
-                if config.use_wandb:
-                    import wandb
-                    wandb.log({
-                        "loss": accumulated_loss,
-                        "learning_rate": lr,
-                        "steps_per_second": steps_per_sec,
-                        "epoch": self.epoch,
-                    }, step=self.global_step)
-
-                accumulated_loss = 0.0
-                step_start_time = time.time()
-
-            # Save checkpoint
-            if self.global_step % config.save_every_steps == 0 and self.rank == 0:
-                self._save_checkpoint()
-
-        logger.info("Training complete!")
+            logger.info("Training complete!")
+        finally:
+            self.tracker.finish()
 
     def _save_checkpoint(self):
         """Save training checkpoint."""
@@ -368,7 +440,7 @@ class SynthGenTrainer:
             "scheduler_state_dict": self.scheduler.state_dict(),
             "global_step": self.global_step,
             "epoch": self.epoch,
-            "config": vars(self.config),
+            "config": self.config.as_dict(),
         }
 
         if self.scaler:
@@ -376,6 +448,7 @@ class SynthGenTrainer:
 
         torch.save(checkpoint, checkpoint_path)
         logger.info(f"Saved checkpoint: {checkpoint_path}")
+        self.tracker.log_checkpoint_ref(str(checkpoint_path), step=self.global_step)
 
         # Keep only last 3 checkpoints
         checkpoints = sorted(checkpoint_dir.glob("checkpoint-*.pt"))
@@ -408,14 +481,29 @@ class SynthGenTrainer:
 def main():
     parser = argparse.ArgumentParser(description="Train SynthGen model")
     parser.add_argument("--config", type=str, help="Path to YAML config file")
-    parser.add_argument("--stage", type=str, choices=["vae", "dit"], default="dit")
-    parser.add_argument("--data-dir", type=str, default="./data")
-    parser.add_argument("--checkpoint-dir", type=str, default="./checkpoints")
+    parser.add_argument("--stage", type=str, choices=["vae", "dit"], default=None)
+    parser.add_argument("--data-dir", type=str, default=None)
+    parser.add_argument("--checkpoint-dir", type=str, default=None)
     parser.add_argument("--resume-from", type=str, default=None)
-    parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--max-steps", type=int, default=500000)
-    parser.add_argument("--learning-rate", type=float, default=1e-4)
-    parser.add_argument("--wandb", action="store_true")
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--max-steps", type=int, default=None)
+    parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument(
+        "--clearml",
+        action="store_true",
+        help="Enable ClearML experiment tracking (primary)",
+    )
+    parser.add_argument(
+        "--clearml-project",
+        type=str,
+        default=None,
+        help="ClearML project name",
+    )
+    parser.add_argument(
+        "--wandb",
+        action="store_true",
+        help="Enable Weights & Biases as secondary tracker",
+    )
 
     args = parser.parse_args()
 
@@ -429,22 +517,27 @@ def main():
     else:
         config = TrainingConfig()
 
-    # Override with CLI args
-    if args.stage:
+    # Override with CLI args only when explicitly provided
+    if args.stage is not None:
         config.stage = args.stage
-    if args.data_dir:
+    if args.data_dir is not None:
         config.data_dir = args.data_dir
-    if args.checkpoint_dir:
+    if args.checkpoint_dir is not None:
         config.checkpoint_dir = args.checkpoint_dir
-    if args.resume_from:
+    if args.resume_from is not None:
         config.resume_from = args.resume_from
-    if args.batch_size:
+    if args.batch_size is not None:
         config.batch_size = args.batch_size
-    if args.max_steps:
+    if args.max_steps is not None:
         config.max_steps = args.max_steps
-    if args.learning_rate:
+    if args.learning_rate is not None:
         config.learning_rate = args.learning_rate
-    config.use_wandb = args.wandb
+    if args.clearml:
+        config.use_clearml = True
+    if args.clearml_project is not None:
+        config.clearml_project = args.clearml_project
+    if args.wandb:
+        config.use_wandb = True
 
     # Check for distributed environment
     if "RANK" in os.environ:

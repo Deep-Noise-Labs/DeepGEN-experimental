@@ -55,11 +55,13 @@ synthgen-experimental/
 │   │   └── scheduler.py # Learning rate schedulers
 │   ├── inference/       # Inference utilities
 │   │   └── generate.py  # Generation pipeline
+│   ├── tracking/        # ClearML (primary) / WandB experiment tracking
 │   └── utils/           # Shared utilities
 │       └── audio.py     # Audio I/O utilities
 ├── tests/               # Unit and integration tests
 ├── docs/                # Documentation
 │   ├── TRAINING.md      # Training guidelines
+│   ├── CLEARML.md       # ClearML setup and upload policy
 │   └── TRITON_INFERENCE.md  # Triton deployment guide
 ├── configs/             # Configuration files
 ├── uv.lock              # Reproducible dependency lockfile
@@ -84,12 +86,15 @@ uv sync --all-extras --index "https://download.pytorch.org/whl/cu121"
 # 3. Download datasets
 uv run synthgen-download --dataset all --output-dir ./data
 
-# 4. Train the model (see docs/TRAINING.md for full guide)
-uv run synthgen-train --config configs/default.yaml
+# 4. Train the model with ClearML tracking (see docs/TRAINING.md and docs/CLEARML.md)
+clearml-init   # once per machine
+uv run synthgen-train --config configs/default.yaml --clearml
 
-# 5. Generate audio
-uv run synthgen-generate --prompt "warm analog pad with slow attack and reverb" --duration 8.0
+# 5. Generate audio (optional ClearML param logging; audio stays local)
+uv run synthgen-generate --prompt "warm analog pad with slow attack and reverb" --duration 8.0 --checkpoint ./checkpoints/dit/checkpoint-10000.pt
 ```
+
+Experiment tracking uses **ClearML** as the primary destination. Dataset lineage is registered as a lightweight JSON manifest only — audio is never uploaded to the ClearML fileserver. See [docs/CLEARML.md](docs/CLEARML.md).
 
 ## Datasets
 

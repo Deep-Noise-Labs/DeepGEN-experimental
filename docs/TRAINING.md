@@ -51,8 +51,9 @@ max_steps: 500000
 warmup_steps: 5000
 mixed_precision: "bf16"
 checkpoint_dir: "./checkpoints/vae"
-use_wandb: true
-wandb_project: "synthgen-vae"
+use_clearml: true
+clearml_project: "synthgen-vae"
+clearml_upload_checkpoints: false
 ```
 
 ### Execution
@@ -60,16 +61,16 @@ wandb_project: "synthgen-vae"
 Launch the training script:
 
 ```bash
-# Single GPU
-uv run synthgen-train --config configs/vae_train.yaml
+# Single GPU (ClearML primary tracking)
+uv run synthgen-train --config configs/vae_train.yaml --clearml
 
-# Multi-GPU (e.g., 4 GPUs)
-uv run torchrun --nproc_per_node=4 -m synthgen.training.trainer --config configs/vae_train.yaml
+# Multi-GPU (e.g., 4 GPUs) — only rank 0 reports to ClearML
+uv run torchrun --nproc_per_node=4 -m synthgen.training.trainer --config configs/vae_train.yaml --clearml
 ```
 
 ### Evaluation
 
-Monitor the validation metrics on Weights & Biases. The key metric to watch is the `spectral_loss`. Once the loss plateaus (typically around 300k-500k steps), the VAE is ready. You can test the reconstruction quality by encoding and decoding test audio files.
+Monitor training metrics in ClearML (see [CLEARML.md](CLEARML.md)). The key metric to watch is `spectral_loss`. Once the loss plateaus (typically around 300k-500k steps), the VAE is ready. You can test the reconstruction quality by encoding and decoding test audio files.
 
 ## Stage 2: Training the Diffusion Transformer (DiT)
 
@@ -90,8 +91,9 @@ max_steps: 1000000
 warmup_steps: 10000
 mixed_precision: "bf16"
 checkpoint_dir: "./checkpoints/dit"
-use_wandb: true
-wandb_project: "synthgen-dit"
+use_clearml: true
+clearml_project: "synthgen-dit"
+clearml_upload_checkpoints: false
 ```
 
 ### Execution
@@ -99,11 +101,11 @@ wandb_project: "synthgen-dit"
 Launch the training script:
 
 ```bash
-# Single GPU
-uv run synthgen-train --config configs/dit_train.yaml
+# Single GPU (ClearML primary tracking)
+uv run synthgen-train --config configs/dit_train.yaml --clearml
 
-# Multi-GPU (e.g., 8 GPUs)
-uv run torchrun --nproc_per_node=8 -m synthgen.training.trainer --config configs/dit_train.yaml
+# Multi-GPU (e.g., 8 GPUs) — only rank 0 reports to ClearML
+uv run torchrun --nproc_per_node=8 -m synthgen.training.trainer --config configs/dit_train.yaml --clearml
 ```
 
 ### Classifier-Free Guidance (CFG) Dropout
@@ -111,6 +113,10 @@ uv run torchrun --nproc_per_node=8 -m synthgen.training.trainer --config configs
 The training loop implements CFG dropout by randomly replacing the text conditioning embeddings with zeros for 10% of the batches. This enables the model to learn both conditional and unconditional generation, which is necessary for classifier-free guidance during inference.
 
 ## Monitoring and Troubleshooting
+
+Experiment tracking defaults to **ClearML** (`--clearml` or `use_clearml: true`). Optional Weights & Biases can run as a secondary backend with `--wandb`. Full setup, space policy (no audio uploads), and env vars are documented in [CLEARML.md](CLEARML.md).
+
+Logged scalars include `loss`, component losses when present (e.g. `spectral_loss`, `l1_loss`, `kl_loss`), `learning_rate`, `steps_per_second`, and `epoch`.
 
 ### Common Issues
 

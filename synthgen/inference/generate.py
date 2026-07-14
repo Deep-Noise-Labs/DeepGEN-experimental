@@ -9,7 +9,6 @@ import argparse
 import logging
 import time
 from pathlib import Path
-from typing import Optional
 
 import torch
 
@@ -30,7 +29,7 @@ class SynthGenPipeline:
     def __init__(
         self,
         checkpoint_path: str,
-        device: Optional[str] = None,
+        device: str | None = None,
         dtype: torch.dtype = torch.float32,
     ):
         """
@@ -77,7 +76,7 @@ class SynthGenPipeline:
         duration: float = 10.0,
         num_steps: int = 25,
         cfg_scale: float = 3.5,
-        seed: Optional[int] = None,
+        seed: int | None = None,
         normalize: bool = True,
     ) -> tuple[torch.Tensor, int]:
         """
@@ -132,7 +131,7 @@ class SynthGenPipeline:
         duration: float = 10.0,
         num_steps: int = 25,
         cfg_scale: float = 3.5,
-        seed: Optional[int] = None,
+        seed: int | None = None,
     ) -> tuple[torch.Tensor, int]:
         """
         Generate audio for multiple prompts in a batch.
@@ -200,30 +199,77 @@ def main():
         "--device", type=str, default=None,
         help="Device (cuda/cpu)"
     )
+    parser.add_argument(
+        "--clearml",
+        action="store_true",
+        help="Log generation params and local output path to ClearML (no media upload)",
+    )
+    parser.add_argument(
+        "--clearml-project",
+        type=str,
+        default="synthgen",
+        help="ClearML project name",
+    )
 
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
 
-    # Initialize pipeline
-    pipeline = SynthGenPipeline(
-        checkpoint_path=args.checkpoint,
-        device=args.device,
-    )
+    tracker = None
+    if args.clearml:
+        from types import SimpleNamespace
 
-    # Generate
-    audio, sample_rate = pipeline.generate(
-        prompt=args.prompt,
-        duration=args.duration,
-        num_steps=args.num_steps,
-        cfg_scale=args.cfg_scale,
-        seed=args.seed,
-    )
+        from synthgen.tracking import build_tracker
+        from synthgen.tracking.inference import log_generation_run
 
-    # Save
-    output_path = Path(args.output)
-    save_audio(output_path, audio.numpy(), sample_rate)
-    logger.info(f"Saved audio to: {output_path}")
+        tracker = build_tracker(
+            SimpleNamespace(
+                use_clearml=True,
+                use_wandb=False,
+                clearml_project=args.clearml_project,
+                clearml_task_name="synthgen-generate",
+                clearml_tags=["inference"],
+                clearml_upload_checkpoints=False,
+                stage="generate",
+            ),
+            rank=0,
+        )
+
+    try:
+        # Initialize pipeline
+        pipeline = SynthGenPipeline(
+            checkpoint_path=args.checkpoint,
+            device=args.device,
+        )
+
+        # Generate
+        audio, sample_rate = pipeline.generate(
+            prompt=args.prompt,
+            duration=args.duration,
+            num_steps=args.num_steps,
+            cfg_scale=args.cfg_scale,
+            seed=args.seed,
+        )
+
+        # Save
+        output_path = Path(args.output)
+        save_audio(output_path, audio.numpy(), sample_rate)
+        logger.info(f"Saved audio to: {output_path}")
+
+        if tracker is not None:
+            log_generation_run(
+                tracker=tracker,
+                prompt=args.prompt,
+                duration=args.duration,
+                num_steps=args.num_steps,
+                cfg_scale=args.cfg_scale,
+                seed=args.seed,
+                checkpoint_path=args.checkpoint,
+                output_path=str(output_path.resolve()),
+            )
+    finally:
+        if tracker is not None:
+            tracker.finish()
 
 
 if __name__ == "__main__":

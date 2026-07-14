@@ -26,6 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 train = [
+    "clearml>=1.14.0",
     "wandb>=0.16.0",
     "tensorboard>=2.14.0",
 ]
