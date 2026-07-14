@@ -1,0 +1,37 @@
+# Stage-1 VAE training on AudioCaps (pipeline validation budget)
+stage: "vae"
+
+vae_latent_dim: 64
+sample_rate: 44100
+audio_channels: 2
+max_duration: 15.0
+
+# 15s stereo @ 44.1kHz with multi-res STFT is memory-heavy; keep micro-batch small
+batch_size: 2
+gradient_accumulation_steps: 8
+learning_rate: 1.0e-4
+weight_decay: 0.01
+max_steps: 10000
+warmup_steps: 500
+min_lr: 1.0e-6
+mixed_precision: "bf16"
+
+checkpoint_dir: "./checkpoints/vae_audiocaps"
+save_every_steps: 1000
+resume_from: null
+
+log_every_steps: 50
+eval_every_steps: 1000
+use_clearml: false
+clearml_project: "synthgen-vae"
+clearml_task_name: "vae-audiocaps"
+clearml_tags: ["vae", "audiocaps"]
+clearml_dataset_name: "audiocaps"
+clearml_register_dataset: true
+clearml_upload_checkpoints: false
+use_wandb: false
+wandb_project: "synthgen"
+
+data_dir: "./data/audiocaps"
+num_workers: 4
+max_samples: null

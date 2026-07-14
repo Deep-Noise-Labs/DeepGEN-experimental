@@ -35,6 +35,46 @@ from synthgen.training.scheduler import WarmupCosineScheduler
 logger = logging.getLogger(__name__)
 
 
+def load_vae_weights_into_synthgen(model: SynthGen, checkpoint_path: str, device: torch.device) -> None:
+    """
+    Load Stage-1 AudioVAE weights into ``model.vae``.
+
+    Accepts a training checkpoint with ``model_state_dict`` whose keys are either
+    bare AudioVAE keys or SynthGen keys prefixed with ``vae.``.
+    """
+    logger.info("Loading VAE weights from %s", checkpoint_path)
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    except TypeError:
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+    state = checkpoint.get("model_state_dict", checkpoint)
+
+    prefixed = {
+        key[len("vae.") :]: value
+        for key, value in state.items()
+        if key.startswith("vae.")
+    }
+    if prefixed:
+        vae_state = prefixed
+    else:
+        skip = ("dit.", "text_encoder.", "scheduler.")
+        vae_state = {
+            key: value
+            for key, value in state.items()
+            if not key.startswith(skip)
+        }
+
+    if not vae_state:
+        raise ValueError(f"No VAE weights found in checkpoint: {checkpoint_path}")
+
+    missing, unexpected = model.vae.load_state_dict(vae_state, strict=False)
+    if unexpected:
+        logger.warning("Unexpected VAE keys ignored: %s", unexpected[:10])
+    if missing:
+        logger.warning("Missing VAE keys: %s", missing[:10])
+    logger.info("Loaded %d VAE parameter tensors", len(vae_state))
+
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -72,6 +112,10 @@ class TrainingConfig:
     checkpoint_dir: str = "./checkpoints"
     save_every_steps: int = 5000
     resume_from: str | None = None
+    vae_checkpoint: str | None = None
+
+    # Classifier-free guidance (DiT stage)
+    cfg_dropout_prob: float = 0.1
 
     # Logging / experiment tracking
     log_every_steps: int = 100
@@ -89,6 +133,7 @@ class TrainingConfig:
     # Data
     data_dir: str = "./data"
     num_workers: int = 8
+    max_samples: int | None = None
 
     # Distributed
     distributed: bool = False
@@ -211,8 +256,14 @@ class SynthGenTrainer:
                 dit_num_heads=config.dit_num_heads,
                 dit_num_layers=config.dit_num_layers,
                 dit_mlp_ratio=config.dit_mlp_ratio,
+                cfg_dropout_prob=config.cfg_dropout_prob,
                 use_dummy_text_encoder=False,
             ).to(self.device)
+
+            if config.vae_checkpoint:
+                load_vae_weights_into_synthgen(
+                    self.model, config.vae_checkpoint, self.device
+                )
 
             # Freeze VAE during DiT training
             if hasattr(self.model, "vae"):
@@ -268,6 +319,7 @@ class SynthGenTrainer:
             duration=config.max_duration,
             channels=config.audio_channels,
             augment=True,
+            max_samples=config.max_samples,
         )
 
         sampler = None
@@ -356,7 +408,13 @@ class SynthGenTrainer:
                         reconstruction, target, mean, log_var = self.model(audio)
                         losses = self.loss_fn(reconstruction, target, mean, log_var)
                     else:
-                        losses = self.model.compute_loss(audio, captions, durations)
+                        # DDP does not forward custom methods; unwrap when needed
+                        model = (
+                            self.model.module
+                            if isinstance(self.model, DDP)
+                            else self.model
+                        )
+                        losses = model.compute_loss(audio, captions, durations)
 
                 last_losses = losses
                 loss = losses["loss"] / config.gradient_accumulation_steps
@@ -419,6 +477,14 @@ class SynthGenTrainer:
                 if self.global_step % config.save_every_steps == 0 and self.rank == 0:
                     self._save_checkpoint()
 
+            # Always persist the final step so short / smoke runs leave a checkpoint
+            if self.rank == 0 and self.global_step > 0:
+                final_path = (
+                    Path(config.checkpoint_dir) / f"checkpoint-{self.global_step}.pt"
+                )
+                if not final_path.exists():
+                    self._save_checkpoint()
+
             logger.info("Training complete!")
         finally:
             self.tracker.finish()
@@ -450,8 +516,14 @@ class SynthGenTrainer:
         logger.info(f"Saved checkpoint: {checkpoint_path}")
         self.tracker.log_checkpoint_ref(str(checkpoint_path), step=self.global_step)
 
-        # Keep only last 3 checkpoints
-        checkpoints = sorted(checkpoint_dir.glob("checkpoint-*.pt"))
+        # Keep only last 3 checkpoints (sort by numeric step, not filename)
+        def _step_key(path: Path) -> int:
+            try:
+                return int(path.stem.split("-")[-1])
+            except ValueError:
+                return -1
+
+        checkpoints = sorted(checkpoint_dir.glob("checkpoint-*.pt"), key=_step_key)
         for old_ckpt in checkpoints[:-3]:
             old_ckpt.unlink()
 
@@ -488,6 +560,18 @@ def main():
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="Limit dataset size (smoke / subset runs)",
+    )
+    parser.add_argument(
+        "--vae-checkpoint",
+        type=str,
+        default=None,
+        help="Path to Stage-1 VAE checkpoint (DiT stage)",
+    )
     parser.add_argument(
         "--clearml",
         action="store_true",
@@ -532,6 +616,10 @@ def main():
         config.max_steps = args.max_steps
     if args.learning_rate is not None:
         config.learning_rate = args.learning_rate
+    if args.max_samples is not None:
+        config.max_samples = args.max_samples
+    if args.vae_checkpoint is not None:
+        config.vae_checkpoint = args.vae_checkpoint
     if args.clearml:
         config.use_clearml = True
     if args.clearml_project is not None:

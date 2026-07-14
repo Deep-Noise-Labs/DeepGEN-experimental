@@ -31,6 +31,7 @@ train = [
     "tensorboard>=2.14.0",
 ]
 download = [
+    "datasets>=2.16.0",
     "yt-dlp>=2023.10.0",
 ]
 
@@ -55,23 +56,21 @@ dev = [
 # ---------------------------------------------------------------------------
 
 [tool.uv]
-# Use PyTorch CPU index for CI / machines without CUDA.
-# On GPU machines, override by running:
-#   uv sync --extra train --index "https://download.pytorch.org/whl/cu121"
-# or set TORCH_INDEX env var (see docs/TRAINING.md).
+# Default to CUDA 12.1 wheels on Linux x86_64 (training machines).
+# For CPU-only / CI: uv sync --index "https://download.pytorch.org/whl/cpu"
 default-groups = ["dev"]
 
 [[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
 explicit = true
 
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cpu", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { index = "pytorch-cu121", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 torchaudio = [
-    { index = "pytorch-cpu", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { index = "pytorch-cu121", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 
 # ---------------------------------------------------------------------------

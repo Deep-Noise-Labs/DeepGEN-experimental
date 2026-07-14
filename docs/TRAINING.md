@@ -19,15 +19,22 @@ For the recommended multi-GPU setup, the repository fully supports PyTorch Distr
 
 Before beginning the training process, you must acquire and prepare the datasets. SynthGen is designed to train on a mixture of datasets to ensure diverse instrument and synthesizer generation capabilities.
 
-1. **Download Datasets**: Use the provided download utility to acquire the datasets. We recommend starting with smaller datasets for testing before scaling up to the full corpus.
-   
+1. **Download Datasets**: Use the provided download utility to acquire the datasets. We recommend starting with **AudioCaps** before scaling up to the full corpus.
+
    ```bash
-   # Download specific datasets
+   # Smoke download (few dozen clips)
+   uv run synthgen-download --dataset audiocaps --output-dir ./data --max-samples 64
+
+   # Full AudioCaps export from Hugging Face (OpenSound/AudioCaps → wav + metadata.jsonl)
    uv run synthgen-download --dataset audiocaps --output-dir ./data
-   uv run synthgen-download --dataset nsynth --output-dir ./data
-   
-   # Or download all available datasets (requires significant time and storage)
-   uv run synthgen-download --dataset all --output-dir ./data
+   ```
+
+   Layout:
+
+   ```text
+   data/audiocaps/
+     metadata.jsonl   # {"file_name": "audio/000000.wav", "caption": "..."}
+     audio/*.wav
    ```
 
 2. **Verify Data**: The dataset loader automatically handles resampling to 44.1 kHz, stereo conversion, and amplitude normalization during the training loop. No manual pre-processing is required.
@@ -40,32 +47,23 @@ The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 6
 
 ### Configuration
 
-Create a configuration file `configs/vae_train.yaml`:
+Ready-made AudioCaps validation configs live in the repo:
 
-```yaml
-stage: "vae"
-batch_size: 8
-gradient_accumulation_steps: 4
-learning_rate: 1e-4
-max_steps: 500000
-warmup_steps: 5000
-mixed_precision: "bf16"
-checkpoint_dir: "./checkpoints/vae"
-use_clearml: true
-clearml_project: "synthgen-vae"
-clearml_upload_checkpoints: false
-```
+- [`configs/vae_audiocaps.yaml`](../configs/vae_audiocaps.yaml) — Stage 1 (short budget)
+- [`configs/dit_audiocaps.yaml`](../configs/dit_audiocaps.yaml) — Stage 2 (loads `vae_checkpoint`)
 
 ### Execution
 
-Launch the training script:
-
 ```bash
-# Single GPU (ClearML primary tracking)
-uv run synthgen-train --config configs/vae_train.yaml --clearml
+# GPU install (CUDA 12.1)
+uv sync --python 3.12 --extra train --extra download
 
-# Multi-GPU (e.g., 4 GPUs) — only rank 0 reports to ClearML
-uv run torchrun --nproc_per_node=4 -m synthgen.training.trainer --config configs/vae_train.yaml --clearml
+# Smoke (single GPU)
+uv run synthgen-train --config configs/vae_audiocaps.yaml --max-samples 64 --max-steps 50 --batch-size 2
+
+# Multi-GPU AudioCaps VAE — only rank 0 reports to ClearML
+uv run torchrun --nproc_per_node=4 -m synthgen.training.trainer \
+  --config configs/vae_audiocaps.yaml --clearml
 ```
 
 ### Evaluation
@@ -78,34 +76,20 @@ Once the VAE is trained, you can proceed to train the DiT. The DiT learns to gen
 
 During this stage, the VAE encoder and the T5 text encoder are frozen. Only the DiT parameters are updated.
 
-### Configuration
+### Configuration / Execution
 
-Create a configuration file `configs/dit_train.yaml`:
-
-```yaml
-stage: "dit"
-batch_size: 16
-gradient_accumulation_steps: 4
-learning_rate: 1e-4
-max_steps: 1000000
-warmup_steps: 10000
-mixed_precision: "bf16"
-checkpoint_dir: "./checkpoints/dit"
-use_clearml: true
-clearml_project: "synthgen-dit"
-clearml_upload_checkpoints: false
-```
-
-### Execution
-
-Launch the training script:
+Pass a Stage-1 checkpoint via `vae_checkpoint` (YAML) or `--vae-checkpoint`. Optimizer state from the VAE run is not loaded — only VAE weights.
 
 ```bash
-# Single GPU (ClearML primary tracking)
-uv run synthgen-train --config configs/dit_train.yaml --clearml
+# Use the highest available Stage-1 checkpoint (numeric retention keeps the last 3)
+uv run torchrun --nproc_per_node=4 -m synthgen.training.trainer \
+  --config configs/dit_audiocaps.yaml \
+  --vae-checkpoint ./checkpoints/vae_audiocaps/checkpoint-9000.pt \
+  --clearml
 
-# Multi-GPU (e.g., 8 GPUs) — only rank 0 reports to ClearML
-uv run torchrun --nproc_per_node=8 -m synthgen.training.trainer --config configs/dit_train.yaml --clearml
+# Optional: generate a local wav (audio is never uploaded to ClearML)
+uv run synthgen-generate --prompt "a dog barking" --duration 5.0 \
+  --checkpoint ./checkpoints/dit_audiocaps/checkpoint-10000.pt
 ```
 
 ### Classifier-Free Guidance (CFG) Dropout

@@ -21,7 +21,7 @@ env/
 .cursor/
 
 # Data and checkpoints (large files)
-data/
+/data/
 checkpoints/
 *.pt
 *.ckpt
@@ -46,3 +46,4 @@ output/
 *.wav
 *.mp3
 *.flac
+outputs/

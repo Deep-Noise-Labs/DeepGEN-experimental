@@ -91,7 +91,16 @@ class T5TextEncoder(nn.Module):
         self._init_model()
 
         if device is None:
-            device = next(self.encoder.parameters()).device
+            # Prefer the parent module device when T5 was lazy-loaded onto CPU
+            try:
+                device = next(self.parameters()).device
+            except StopIteration:
+                device = next(self.encoder.parameters()).device
+
+        # Lazy-loaded T5 starts on CPU; move once to the request/parent device
+        enc_device = next(self.encoder.parameters()).device
+        if enc_device != device:
+            self._encoder = self._encoder.to(device)
 
         # Tokenize
         tokens = self.tokenizer(
