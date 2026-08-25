@@ -17,6 +17,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from synthgen.model.antialias import AntiAliasedSnake
+
 
 # =============================================================================
 # Activation Functions
@@ -41,6 +43,18 @@ class Snake(nn.Module):
         return x + (1.0 / (self.alpha + 1e-8)) * torch.sin(self.alpha * x) ** 2
 
 
+def make_snake(channels: int, antialias: bool = False) -> nn.Module:
+    """
+    Build a Snake activation, optionally anti-aliased (2x oversampled).
+
+    Both variants expose an identical state dict (a single ``alpha``
+    parameter), so checkpoints transfer between them either way.
+    """
+    if antialias:
+        return AntiAliasedSnake(channels)
+    return Snake(channels)
+
+
 # =============================================================================
 # Building Blocks
 # =============================================================================
@@ -54,19 +68,20 @@ class ResidualBlock(nn.Module):
         channels: int,
         dilation: int = 1,
         kernel_size: int = 7,
+        antialias: bool = False,
     ):
         super().__init__()
         padding = (kernel_size - 1) * dilation // 2
 
         self.block = nn.Sequential(
-            Snake(channels),
+            make_snake(channels, antialias),
             nn.Conv1d(
                 channels, channels,
                 kernel_size=kernel_size,
                 dilation=dilation,
                 padding=padding,
             ),
-            Snake(channels),
+            make_snake(channels, antialias),
             nn.Conv1d(channels, channels, kernel_size=1),
         )
 
@@ -125,12 +140,13 @@ class DecoderBlock(nn.Module):
         stride: int = 4,
         num_residual: int = 3,
         dilations: tuple = (1, 3, 9),
+        antialias: bool = False,
     ):
         super().__init__()
 
         # Upsampling via transposed convolution
         self.upsample = nn.Sequential(
-            Snake(in_channels),
+            make_snake(in_channels, antialias),
             nn.ConvTranspose1d(
                 in_channels, out_channels,
                 kernel_size=stride * 2,
@@ -142,7 +158,7 @@ class DecoderBlock(nn.Module):
 
         # Residual layers
         self.residual_layers = nn.Sequential(*[
-            ResidualBlock(out_channels, dilation=d)
+            ResidualBlock(out_channels, dilation=d, antialias=antialias)
             for d in dilations[:num_residual]
         ])
 
@@ -250,6 +266,13 @@ class AudioDecoder(nn.Module):
 
     Architecture mirrors the encoder with transposed convolutions for upsampling.
     Does NOT use tanh at the output to avoid harmonic distortion.
+
+    With ``antialias=True`` (the default) every Snake activation is evaluated
+    at a 2x oversampled rate behind windowed-sinc filters (BigVGAN-style), so
+    the harmonics the nonlinearity generates are attenuated before they can
+    fold back over Nyquist as inharmonic aliasing. This matters most in the
+    decoder, whose late stages run at the output sample rate. Checkpoints are
+    unaffected: both activation variants share an identical state dict.
     """
 
     def __init__(
@@ -260,11 +283,13 @@ class AudioDecoder(nn.Module):
         channel_multipliers: tuple = (8, 4, 2, 1),
         strides: tuple = (8, 8, 4, 4),
         num_residual_per_block: int = 3,
+        antialias: bool = True,
     ):
         super().__init__()
 
         self.out_channels = out_channels
         self.latent_dim = latent_dim
+        self.antialias = antialias
 
         # Input projection from latent
         first_channels = base_channels * channel_multipliers[0]
@@ -272,8 +297,8 @@ class AudioDecoder(nn.Module):
 
         # Pre-bottleneck
         self.bottleneck = nn.Sequential(
-            ResidualBlock(first_channels, dilation=1),
-            ResidualBlock(first_channels, dilation=3),
+            ResidualBlock(first_channels, dilation=1, antialias=antialias),
+            ResidualBlock(first_channels, dilation=3, antialias=antialias),
         )
 
         # Decoder blocks
@@ -293,13 +318,14 @@ class AudioDecoder(nn.Module):
                     out_channels=out_ch,
                     stride=stride,
                     num_residual=num_residual_per_block,
+                    antialias=antialias,
                 )
             )
             current_channels = out_ch
 
         # Output projection (no tanh to avoid harmonic distortion)
         self.output_conv = nn.Sequential(
-            Snake(current_channels),
+            make_snake(current_channels, antialias),
             nn.Conv1d(current_channels, out_channels, kernel_size=7, padding=3),
         )
         self.output_conv[1] = nn.utils.parametrizations.weight_norm(self.output_conv[1])
@@ -346,6 +372,7 @@ class AudioVAE(nn.Module):
         decoder_channel_multipliers: tuple = (8, 4, 2, 1),
         strides: tuple = (4, 4, 8, 8),
         num_residual_per_block: int = 3,
+        decoder_antialias: bool = True,
     ):
         super().__init__()
 
@@ -370,6 +397,7 @@ class AudioVAE(nn.Module):
             channel_multipliers=decoder_channel_multipliers,
             strides=tuple(reversed(strides)),
             num_residual_per_block=num_residual_per_block,
+            antialias=decoder_antialias,
         )
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

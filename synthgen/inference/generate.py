@@ -61,6 +61,7 @@ class SynthGenPipeline:
 
         model = SynthGen(
             vae_latent_dim=config.get("vae_latent_dim", 64),
+            vae_decoder_antialias=config.get("vae_decoder_antialias", True),
             dit_model_dim=config.get("dit_model_dim", 1024),
             dit_num_heads=config.get("dit_num_heads", 16),
             dit_num_layers=config.get("dit_num_layers", 20),

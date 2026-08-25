@@ -3,6 +3,8 @@
 
 # Model Architecture
 vae_latent_dim: 64
+# Anti-aliased (2x oversampled) Snake activations in the VAE decoder (BigVGAN-style)
+vae_decoder_antialias: true
 dit_model_dim: 1024
 dit_num_heads: 16
 dit_num_layers: 20
