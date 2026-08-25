@@ -117,6 +117,12 @@ class TrainingConfig:
     # Classifier-free guidance (DiT stage)
     cfg_dropout_prob: float = 0.1
 
+    # Flow-matching timestep sampling (DiT stage): "logit_normal" or "uniform"
+    timestep_sampling: str = "logit_normal"
+    timestep_logit_mean: float = 0.0
+    timestep_logit_std: float = 1.0
+    timestep_uniform_mix_prob: float = 0.25
+
     # Logging / experiment tracking
     log_every_steps: int = 100
     eval_every_steps: int = 2500
@@ -257,6 +263,10 @@ class SynthGenTrainer:
                 dit_num_layers=config.dit_num_layers,
                 dit_mlp_ratio=config.dit_mlp_ratio,
                 cfg_dropout_prob=config.cfg_dropout_prob,
+                timestep_sampling=config.timestep_sampling,
+                timestep_logit_mean=config.timestep_logit_mean,
+                timestep_logit_std=config.timestep_logit_std,
+                timestep_uniform_mix_prob=config.timestep_uniform_mix_prob,
                 use_dummy_text_encoder=False,
             ).to(self.device)
 

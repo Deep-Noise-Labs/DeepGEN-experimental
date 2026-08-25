@@ -52,3 +52,11 @@ num_workers: 8
 
 # Classifier-Free Guidance
 cfg_dropout_prob: 0.1
+
+# Flow-matching timestep sampling: "logit_normal" (recommended) or "uniform".
+# uniform_mix_prob keeps a uniform floor under the logit-normal so the path
+# extremes stay covered (0.0 = pure logit-normal, 1.0 = uniform).
+timestep_sampling: "logit_normal"
+timestep_logit_mean: 0.0
+timestep_logit_std: 1.0
+timestep_uniform_mix_prob: 0.25

@@ -96,6 +96,12 @@ uv run synthgen-generate --prompt "a dog barking" --duration 5.0 \
 
 The training loop implements CFG dropout by randomly replacing the text conditioning embeddings with zeros for 10% of the batches. This enables the model to learn both conditional and unconditional generation, which is necessary for classifier-free guidance during inference.
 
+### Timestep Sampling (Flow Matching)
+
+Training timesteps are drawn from a **logit-normal distribution with a uniform floor** by default (`timestep_sampling: "logit_normal"` with `timestep_uniform_mix_prob: 0.25`, plus `timestep_logit_mean: 0.0` and `timestep_logit_std: 1.0`): with probability 0.75, `t = sigmoid(n)` with `n ~ N(mean, std)`; with probability 0.25, `t ~ U(0, 1)`.
+
+The logit-normal component concentrates training on the intermediate timesteps (`0.25 < t < 0.75`) where the velocity target is hardest to predict and where sample quality is decided, following the rectified-flow recipe validated in Stable Diffusion 3 ([arXiv:2403.03206](https://arxiv.org/abs/2403.03206)), where logit-normal sampling outperformed uniform sampling across all evaluated benchmarks. The uniform floor exists because pure logit-normal undersamples the path extremes (~1.4% of batches at `t > 0.9` vs 10% for uniform; the mixture restores ~3.5%): in a controlled small-scale A/B with this repo's DiT, the pure recipe left an audible noise floor under decays and silences (the final denoising steps at high `t` do that clean-up), while the 75/25 mixture kept the mid-path gain and decayed cleanly. Set `timestep_uniform_mix_prob: 0.0` for the pure SD3 recipe, or `timestep_sampling: "uniform"` to reproduce the legacy behaviour. The sampled distribution only affects training - inference integrates the ODE on a fixed step grid and is unchanged.
+
 ## Monitoring and Troubleshooting
 
 Experiment tracking defaults to **ClearML** (`--clearml` or `use_clearml: true`). Optional Weights & Biases can run as a secondary backend with `--wandb`. Full setup, space policy (no audio uploads), and env vars are documented in [CLEARML.md](CLEARML.md).
