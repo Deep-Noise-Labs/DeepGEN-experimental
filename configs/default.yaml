@@ -52,3 +52,14 @@ num_workers: 8
 
 # Classifier-Free Guidance
 cfg_dropout_prob: 0.1
+
+# Adversarial VAE training (VAE stage only)
+# Multi-scale STFT discriminator + feature matching, enabled after a
+# reconstruction-only warmup so the discriminator sees a competent decoder.
+use_adversarial: true
+adversarial_start_step: 25000
+adversarial_weight: 1.0
+feature_matching_weight: 5.0
+disc_learning_rate: 1.0e-4
+disc_fft_sizes: [2048, 1024, 512, 256, 128]
+disc_base_filters: 32

@@ -43,7 +43,21 @@ Before beginning the training process, you must acquire and prepare the datasets
 
 The first stage involves training the Audio VAE to compress raw audio waveforms into a compact latent space. This step is critical, as the quality of the VAE dictates the maximum possible audio quality of the final generation.
 
-The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 64-dimensional latent space. It is trained using a combination of L1 reconstruction loss, Multi-resolution STFT loss, and KL divergence loss.
+The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 64-dimensional latent space. It is trained using a combination of L1 reconstruction loss, Multi-resolution STFT loss, KL divergence loss, and - after a reconstruction-only warmup - an adversarial loss from a multi-scale complex-STFT discriminator with feature matching (the EnCodec / Descript Audio Codec / Stable Audio recipe).
+
+The adversarial stage matters for the final sound: magnitude-only spectral losses are phase-blind, so a decoder trained on them alone converges to reconstructions with smeared transients and a dull top end. The discriminator sees the complex STFT (magnitude and phase) at five resolutions simultaneously, forcing phase-coherent attacks and a crisp high end. The feature-matching term stabilises training by matching intermediate discriminator features between real and reconstructed audio.
+
+Adversarial training is controlled by these config fields (see `configs/default.yaml`):
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `use_adversarial` | `true` | Enable the discriminator for the VAE stage |
+| `adversarial_start_step` | `25000` | Reconstruction-only warmup before the GAN kicks in |
+| `adversarial_weight` | `1.0` | Weight of the hinge adversarial term |
+| `feature_matching_weight` | `5.0` | Weight of the feature-matching term |
+| `disc_learning_rate` | `1.0e-4` | Discriminator AdamW learning rate |
+| `disc_fft_sizes` | `[2048, 1024, 512, 256, 128]` | STFT resolutions of the discriminator ensemble |
+| `disc_base_filters` | `32` | Channel width of each sub-discriminator |
 
 ### Configuration
 
@@ -68,7 +82,7 @@ uv run torchrun --nproc_per_node=4 -m synthgen.training.trainer \
 
 ### Evaluation
 
-Monitor training metrics in ClearML (see [CLEARML.md](CLEARML.md)). The key metric to watch is `spectral_loss`. Once the loss plateaus (typically around 300k-500k steps), the VAE is ready. You can test the reconstruction quality by encoding and decoding test audio files.
+Monitor training metrics in ClearML (see [CLEARML.md](CLEARML.md)). The key metric to watch is `spectral_loss`; once adversarial training starts, also watch `disc_loss` (should hover near a stable value, not collapse to 0) and `feature_matching_loss` (should trend down). Once the loss plateaus (typically around 300k-500k steps), the VAE is ready. You can test the reconstruction quality by encoding and decoding test audio files.
 
 ## Stage 2: Training the Diffusion Transformer (DiT)
 
