@@ -232,6 +232,23 @@ class TestSynthGen:
         assert losses["loss"].ndim == 0  # Scalar
         assert losses["loss"].item() > 0
 
+    def test_compute_loss_with_weighted_loss_fn(self, model):
+        # The trainer passes FlowMatchingLoss(weighting="min_snr") through
+        # compute_loss; previously the weighting was constructed but unused.
+        from synthgen.training.losses import FlowMatchingLoss
+
+        audio = torch.randn(2, 2, 8192)
+        captions = ["warm pad sound", "bright lead synth"]
+        durations = torch.tensor([10.0, 5.0])
+
+        losses = model.compute_loss(
+            audio, captions, durations,
+            loss_fn=FlowMatchingLoss(weighting="min_snr"),
+        )
+        assert losses["loss"].ndim == 0
+        assert torch.isfinite(losses["loss"])
+        assert losses["loss"].item() > 0
+
     def test_generate(self, model):
         audio = model.generate(
             prompts=["test sound"],

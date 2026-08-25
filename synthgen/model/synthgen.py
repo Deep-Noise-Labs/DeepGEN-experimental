@@ -231,6 +231,7 @@ class SynthGen(nn.Module):
         audio: torch.Tensor,
         captions: list[str],
         durations: torch.Tensor,
+        loss_fn: nn.Module | None = None,
     ) -> dict[str, torch.Tensor]:
         """
         Compute training loss for the DiT.
@@ -239,6 +240,9 @@ class SynthGen(nn.Module):
             audio: Audio tensor (batch, channels, samples).
             captions: List of text captions.
             durations: Duration in seconds (batch,).
+            loss_fn: Optional velocity loss taking (v_pred, v_target, t),
+                e.g. ``FlowMatchingLoss`` with timestep weighting. Falls back
+                to unweighted MSE when None.
 
         Returns:
             Dictionary with 'loss' and optional auxiliary losses.
@@ -273,8 +277,11 @@ class SynthGen(nn.Module):
         # Target velocity
         v_target = self.scheduler.get_velocity(latents, noise)
 
-        # MSE loss on velocity prediction
-        loss = torch.nn.functional.mse_loss(v_pred, v_target)
+        # Velocity-prediction loss (timestep-weighted if a loss_fn is given)
+        if loss_fn is not None:
+            loss = loss_fn(v_pred, v_target, t)
+        else:
+            loss = torch.nn.functional.mse_loss(v_pred, v_target)
 
         return {"loss": loss}
 
