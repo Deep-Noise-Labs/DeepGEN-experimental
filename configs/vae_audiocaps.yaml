@@ -2,6 +2,8 @@
 stage: "vae"
 
 vae_latent_dim: 64
+# Anti-aliased (2x oversampled) Snake activations in the VAE decoder (BigVGAN-style)
+vae_decoder_antialias: true
 sample_rate: 44100
 audio_channels: 2
 max_duration: 15.0

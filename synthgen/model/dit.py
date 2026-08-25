@@ -458,6 +458,14 @@ class DiffusionTransformer(nn.Module):
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
+        # Restore adaLN-Zero: the loop above clobbers the zero-init done in
+        # AdaptiveLayerNorm.__init__, so every block would start with a large
+        # random modulation instead of an identity transform.
+        for module in self.modules():
+            if isinstance(module, AdaptiveLayerNorm):
+                nn.init.zeros_(module.proj.weight)
+                nn.init.zeros_(module.proj.bias)
+
         # Zero-initialize output projection for residual learning
         nn.init.zeros_(self.output_proj[-1].weight)
         nn.init.zeros_(self.output_proj[-1].bias)

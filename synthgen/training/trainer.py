@@ -85,6 +85,7 @@ class TrainingConfig:
 
     # Model
     vae_latent_dim: int = 64
+    vae_decoder_antialias: bool = True
     dit_model_dim: int = 1024
     dit_num_heads: int = 16
     dit_num_layers: int = 20
@@ -248,10 +249,12 @@ class SynthGenTrainer:
             self.model = AudioVAE(
                 in_channels=config.audio_channels,
                 latent_dim=config.vae_latent_dim,
+                decoder_antialias=config.vae_decoder_antialias,
             ).to(self.device)
         else:
             self.model = SynthGen(
                 vae_latent_dim=config.vae_latent_dim,
+                vae_decoder_antialias=config.vae_decoder_antialias,
                 dit_model_dim=config.dit_model_dim,
                 dit_num_heads=config.dit_num_heads,
                 dit_num_layers=config.dit_num_layers,

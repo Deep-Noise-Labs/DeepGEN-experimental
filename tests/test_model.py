@@ -256,3 +256,20 @@ class TestTextEncoderDummy:
         texts = ["hello world", "test prompt"]
         out = encoder.encode(texts)
         assert out.shape == (2, 256, 768)
+
+
+class TestDiTInitialization:
+    def test_adaln_projections_are_zero_initialized(self):
+        """adaLN-Zero: modulation layers must start as identity transforms."""
+        from synthgen.model.dit import AdaptiveLayerNorm, DiffusionTransformer
+
+        dit = DiffusionTransformer(
+            latent_dim=8, model_dim=64, num_heads=4, num_layers=2
+        )
+        adaln_layers = [
+            m for m in dit.modules() if isinstance(m, AdaptiveLayerNorm)
+        ]
+        assert len(adaln_layers) > 0
+        for layer in adaln_layers:
+            assert torch.all(layer.proj.weight == 0)
+            assert torch.all(layer.proj.bias == 0)
