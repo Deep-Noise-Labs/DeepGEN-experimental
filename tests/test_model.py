@@ -203,6 +203,60 @@ class TestConditionalFlowMatchingScheduler:
         assert torch.allclose(v, x_0 - noise)
 
 
+class TestTimestepSampling:
+    def test_default_is_logit_normal(self):
+        scheduler = ConditionalFlowMatchingScheduler()
+        assert scheduler.timestep_sampling == "logit_normal"
+
+    def test_logit_normal_range_and_shape(self):
+        scheduler = ConditionalFlowMatchingScheduler(timestep_sampling="logit_normal")
+        t = scheduler.sample_timestep(batch_size=4096, device=torch.device("cpu"))
+        assert t.shape == (4096,)
+        assert (t > 0).all() and (t < 1).all()
+
+    def test_logit_normal_concentrates_mid_timesteps(self):
+        # For t = sigmoid(N(0,1)), P(0.25 < t < 0.75) ~ 0.73 vs 0.5 for uniform.
+        torch.manual_seed(0)
+        scheduler = ConditionalFlowMatchingScheduler(timestep_sampling="logit_normal")
+        t = scheduler.sample_timestep(batch_size=20000, device=torch.device("cpu"))
+        mid_fraction = ((t > 0.25) & (t < 0.75)).float().mean().item()
+        assert mid_fraction > 0.65
+
+    def test_uniform_mode_preserved(self):
+        torch.manual_seed(0)
+        scheduler = ConditionalFlowMatchingScheduler(timestep_sampling="uniform")
+        t = scheduler.sample_timestep(batch_size=20000, device=torch.device("cpu"))
+        assert (t >= 0).all() and (t <= 1).all()
+        mid_fraction = ((t > 0.25) & (t < 0.75)).float().mean().item()
+        assert abs(mid_fraction - 0.5) < 0.02
+
+    def test_logit_mean_shifts_distribution(self):
+        torch.manual_seed(0)
+        low = ConditionalFlowMatchingScheduler(logit_mean=-1.0)
+        high = ConditionalFlowMatchingScheduler(logit_mean=1.0)
+        t_low = low.sample_timestep(batch_size=20000, device=torch.device("cpu"))
+        t_high = high.sample_timestep(batch_size=20000, device=torch.device("cpu"))
+        assert t_low.mean().item() < 0.4 < 0.6 < t_high.mean().item()
+
+    def test_invalid_mode_rejected(self):
+        with pytest.raises(ValueError):
+            ConditionalFlowMatchingScheduler(timestep_sampling="cosine")
+
+    def test_synthgen_passes_through_sampling_config(self):
+        model = SynthGen(
+            vae_latent_dim=32,
+            vae_base_channels=16,
+            vae_strides=(4, 4, 4, 4),
+            dit_model_dim=128,
+            dit_num_heads=4,
+            dit_num_layers=2,
+            dit_cond_dim=128,
+            timestep_sampling="uniform",
+            use_dummy_text_encoder=True,
+        )
+        assert model.scheduler.timestep_sampling == "uniform"
+
+
 # =============================================================================
 # Full Model Tests
 # =============================================================================

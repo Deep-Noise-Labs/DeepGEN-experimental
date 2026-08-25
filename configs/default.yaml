@@ -52,3 +52,8 @@ num_workers: 8
 
 # Classifier-Free Guidance
 cfg_dropout_prob: 0.1
+
+# Flow-matching timestep sampling: "logit_normal" (recommended) or "uniform"
+timestep_sampling: "logit_normal"
+timestep_logit_mean: 0.0
+timestep_logit_std: 1.0
