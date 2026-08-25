@@ -6,13 +6,10 @@ Includes losses for:
 - DiT training (flow matching velocity MSE)
 """
 
-import math
-from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 
 # =============================================================================
 # VAE Losses
@@ -166,6 +163,87 @@ class VAELoss(nn.Module):
 
 
 # =============================================================================
+# Adversarial Losses (VAE stage)
+# =============================================================================
+
+
+def discriminator_loss(
+    real_logits: list[torch.Tensor],
+    fake_logits: list[torch.Tensor],
+) -> torch.Tensor:
+    """
+    Hinge loss for the discriminator.
+
+    The discriminator is trained to score real audio above +1 and
+    reconstructions below -1, per sub-discriminator.
+
+    Args:
+        real_logits: Logit maps for real audio, one per resolution.
+        fake_logits: Logit maps for reconstructed audio (detached), one
+            per resolution.
+
+    Returns:
+        Scalar discriminator loss.
+    """
+    loss = 0.0
+    for real, fake in zip(real_logits, fake_logits):
+        loss = loss + F.relu(1.0 - real).mean() + F.relu(1.0 + fake).mean()
+    return loss / len(real_logits)
+
+
+def generator_adversarial_loss(fake_logits: list[torch.Tensor]) -> torch.Tensor:
+    """
+    Hinge adversarial loss for the generator (VAE decoder).
+
+    Pushes reconstructions towards regions the discriminator scores as
+    real, which in practice restores phase coherence and transient
+    sharpness that magnitude losses cannot enforce.
+
+    Args:
+        fake_logits: Logit maps for reconstructed audio (with gradients),
+            one per resolution.
+
+    Returns:
+        Scalar adversarial loss.
+    """
+    loss = 0.0
+    for fake in fake_logits:
+        loss = loss - fake.mean()
+    return loss / len(fake_logits)
+
+
+def feature_matching_loss(
+    real_features: list[list[torch.Tensor]],
+    fake_features: list[list[torch.Tensor]],
+) -> torch.Tensor:
+    """
+    L1 feature matching loss over discriminator activations.
+
+    Matches intermediate discriminator feature maps of the reconstruction
+    to those of the real audio, normalised per layer by the mean magnitude
+    of the real features (EnCodec-style). This stabilises adversarial
+    training and acts as a learned perceptual distance.
+
+    Args:
+        real_features: Per-resolution lists of feature maps for real audio.
+        fake_features: Per-resolution lists of feature maps for
+            reconstructed audio.
+
+    Returns:
+        Scalar feature matching loss.
+    """
+    loss = 0.0
+    num_layers = 0
+    for real_maps, fake_maps in zip(real_features, fake_features):
+        for real, fake in zip(real_maps, fake_maps):
+            loss = loss + F.l1_loss(fake, real.detach()) / (
+                real.detach().abs().mean() + 1e-8
+            )
+            num_layers += 1
+    return loss / max(num_layers, 1)
+
+
+# =============================================================================
 # DiT Losses
 # =============================================================================
 
@@ -193,7 +271,7 @@ class FlowMatchingLoss(nn.Module):
         self,
         v_pred: torch.Tensor,
         v_target: torch.Tensor,
-        t: Optional[torch.Tensor] = None,
+        t: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Compute flow matching loss.

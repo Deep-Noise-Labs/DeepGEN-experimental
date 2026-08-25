@@ -52,3 +52,13 @@ num_workers: 8
 
 # Classifier-Free Guidance
 cfg_dropout_prob: 0.1
+
+# Adversarial training (VAE stage only; ignored for the DiT stage).
+# The multi-resolution STFT discriminator + feature matching restores
+# phase coherence and transient sharpness that magnitude-only spectral
+# losses cannot enforce.
+adversarial: true
+adv_start_step: 2000        # let reconstruction stabilise before the GAN kicks in
+adv_weight: 1.0
+feature_matching_weight: 5.0
+disc_learning_rate: 1.0e-4
