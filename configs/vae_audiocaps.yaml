@@ -35,3 +35,11 @@ wandb_project: "synthgen"
 data_dir: "./data/audiocaps"
 num_workers: 4
 max_samples: null
+
+# Adversarial training: discriminator + feature matching for phase-coherent,
+# transient-sharp reconstructions (EnCodec/DAC/Stable Audio style).
+adversarial: true
+adv_start_step: 2000
+adv_weight: 1.0
+feature_matching_weight: 5.0
+disc_learning_rate: 1.0e-4

@@ -43,7 +43,18 @@ Before beginning the training process, you must acquire and prepare the datasets
 
 The first stage involves training the Audio VAE to compress raw audio waveforms into a compact latent space. This step is critical, as the quality of the VAE dictates the maximum possible audio quality of the final generation.
 
-The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 64-dimensional latent space. It is trained using a combination of L1 reconstruction loss, Multi-resolution STFT loss, and KL divergence loss.
+The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 64-dimensional latent space. It is trained using a combination of L1 reconstruction loss, Multi-resolution STFT loss, and KL divergence loss, plus an adversarial objective described below.
+
+### Adversarial training (discriminator + feature matching)
+
+Magnitude-only spectral losses cannot constrain phase, so a VAE trained with them alone converges to reconstructions with smeared transients and a diffuse, "underwater" top end - unacceptable for professional sample libraries. To close this gap the VAE stage trains a **multi-resolution complex-STFT discriminator** (`synthgen/model/discriminator.py`) alongside the autoencoder, in the style of EnCodec, Descript Audio Codec and Stable Audio:
+
+- The discriminator sees the real and imaginary STFT planes at five resolutions (FFT 2048 down to 128), making it directly sensitive to phase structure and transient sharpness.
+- The generator (VAE) receives a hinge adversarial loss plus an L1 **feature-matching loss** over discriminator activations, which stabilises training and acts as a learned perceptual distance.
+- The discriminator starts after `adv_start_step` (default 2000) so reconstruction stabilises first. Weights: `adv_weight` (default 1.0) and `feature_matching_weight` (default 5.0).
+- Set `adversarial: false` in the config to reproduce the old purely spectral objective.
+
+The discriminator, its optimizer and its LR schedule are saved in the training checkpoint, so adversarial runs resume cleanly. The discriminator is a training-time component only - inference checkpoints do not need it and `synthgen-generate` never loads it.
 
 ### Configuration
 
@@ -68,7 +79,7 @@ uv run torchrun --nproc_per_node=4 -m synthgen.training.trainer \
 
 ### Evaluation
 
-Monitor training metrics in ClearML (see [CLEARML.md](CLEARML.md)). The key metric to watch is `spectral_loss`. Once the loss plateaus (typically around 300k-500k steps), the VAE is ready. You can test the reconstruction quality by encoding and decoding test audio files.
+Monitor training metrics in ClearML (see [CLEARML.md](CLEARML.md)). The key metric to watch is `spectral_loss`; once adversarial training starts, also watch `disc_loss`, `adv_loss` and `fm_loss`. A healthy run keeps `disc_loss` fluctuating around 1.0-2.0 (neither collapsing to 0 nor exploding) while `fm_loss` trends down. Once the losses plateau (typically around 300k-500k steps), the VAE is ready. You can test the reconstruction quality by encoding and decoding test audio files - listen specifically for transient sharpness (drum attacks, plucks) and stability of sustained tones.
 
 ## Stage 2: Training the Diffusion Transformer (DiT)
 

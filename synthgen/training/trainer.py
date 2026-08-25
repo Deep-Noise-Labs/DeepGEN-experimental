@@ -23,13 +23,20 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 
+from synthgen.model.discriminator import MultiResolutionSTFTDiscriminator
 from synthgen.model.synthgen import SynthGen
 from synthgen.model.vae import AudioVAE
 from synthgen.tracking import build_tracker
 from synthgen.tracking.dataset_registry import register_dataset_metadata
 from synthgen.tracking.null import NullTracker
 from synthgen.tracking.tracker import ExperimentTracker, config_as_dict, get_clearml_task
-from synthgen.training.losses import FlowMatchingLoss, VAELoss
+from synthgen.training.losses import (
+    FlowMatchingLoss,
+    VAELoss,
+    discriminator_loss,
+    feature_matching_loss,
+    generator_adversarial_loss,
+)
 from synthgen.training.scheduler import WarmupCosineScheduler
 
 logger = logging.getLogger(__name__)
@@ -116,6 +123,14 @@ class TrainingConfig:
 
     # Classifier-free guidance (DiT stage)
     cfg_dropout_prob: float = 0.1
+
+    # Adversarial training (VAE stage)
+    adversarial: bool = True
+    adv_start_step: int = 2000
+    adv_weight: float = 1.0
+    feature_matching_weight: float = 5.0
+    disc_learning_rate: float = 1e-4
+    disc_fft_sizes: list | None = None  # default: (2048, 1024, 512, 256, 128)
 
     # Logging / experiment tracking
     log_every_steps: int = 100
@@ -243,12 +258,22 @@ class SynthGenTrainer:
     def _init_model(self):
         """Initialize the model."""
         config = self.config
+        self.discriminator = None
 
         if config.stage == "vae":
             self.model = AudioVAE(
                 in_channels=config.audio_channels,
                 latent_dim=config.vae_latent_dim,
             ).to(self.device)
+
+            if config.adversarial:
+                fft_sizes = tuple(
+                    config.disc_fft_sizes or (2048, 1024, 512, 256, 128)
+                )
+                self.discriminator = MultiResolutionSTFTDiscriminator(
+                    fft_sizes=fft_sizes,
+                    in_channels=config.audio_channels,
+                ).to(self.device)
         else:
             self.model = SynthGen(
                 vae_latent_dim=config.vae_latent_dim,
@@ -272,6 +297,10 @@ class SynthGenTrainer:
 
         if config.distributed:
             self.model = DDP(self.model, device_ids=[self.rank])
+            if self.discriminator is not None:
+                self.discriminator = DDP(
+                    self.discriminator, device_ids=[self.rank]
+                )
 
         # Log parameter count
         total_params = sum(p.numel() for p in self.model.parameters())
@@ -306,6 +335,24 @@ class SynthGenTrainer:
             total_steps=config.max_steps,
             min_lr=config.min_lr,
         )
+
+        # Separate optimizer/scheduler for the discriminator (VAE stage)
+        self.disc_optimizer = None
+        self.disc_scheduler = None
+        if self.discriminator is not None:
+            self.disc_optimizer = torch.optim.AdamW(
+                self.discriminator.parameters(),
+                lr=config.disc_learning_rate,
+                weight_decay=config.weight_decay,
+                betas=(0.8, 0.99),
+                eps=1e-8,
+            )
+            self.disc_scheduler = WarmupCosineScheduler(
+                self.disc_optimizer,
+                warmup_steps=config.warmup_steps,
+                total_steps=config.max_steps,
+                min_lr=config.min_lr,
+            )
 
     def _init_data(self):
         """Initialize data loaders."""
@@ -344,6 +391,64 @@ class SynthGenTrainer:
         else:
             self.loss_fn = FlowMatchingLoss(weighting="min_snr")
 
+    def _adversarial_step(
+        self,
+        reconstruction: torch.Tensor,
+        target: torch.Tensor,
+        losses: dict[str, Any],
+        amp_dtype: torch.dtype | None,
+    ) -> None:
+        """
+        Run the discriminator update and add generator adversarial terms.
+
+        The discriminator sees the reconstruction detached, so its loss
+        only updates the discriminator. The generator terms are computed
+        with discriminator parameters frozen, so `losses["loss"]`
+        backpropagates into the VAE only. Both backward passes respect
+        gradient accumulation; optimizer steps happen at the accumulation
+        boundary in the main loop.
+        """
+        config = self.config
+        enabled = amp_dtype is not None
+
+        # --- Discriminator update (reconstruction detached) ---
+        with autocast(dtype=amp_dtype, enabled=enabled):
+            real_logits, real_features = self.discriminator(target.detach())
+            fake_logits, _ = self.discriminator(reconstruction.detach())
+            d_loss = discriminator_loss(real_logits, fake_logits)
+
+        d_loss_scaled = d_loss / config.gradient_accumulation_steps
+        if self.scaler:
+            self.scaler.scale(d_loss_scaled).backward()
+        else:
+            d_loss_scaled.backward()
+
+        # --- Generator adversarial + feature matching ---
+        # Freeze discriminator parameters so the generator backward pass
+        # (run later on losses["loss"]) cannot leak gradients into them.
+        disc_params = [
+            p for p in self.discriminator.parameters() if p.requires_grad
+        ]
+        for p in disc_params:
+            p.requires_grad_(False)
+        try:
+            with autocast(dtype=amp_dtype, enabled=enabled):
+                fake_logits_g, fake_features = self.discriminator(reconstruction)
+                adv_loss = generator_adversarial_loss(fake_logits_g)
+                fm_loss = feature_matching_loss(real_features, fake_features)
+        finally:
+            for p in disc_params:
+                p.requires_grad_(True)
+
+        losses["adv_loss"] = adv_loss
+        losses["fm_loss"] = fm_loss
+        losses["disc_loss"] = d_loss.detach()
+        losses["loss"] = (
+            losses["loss"]
+            + config.adv_weight * adv_loss
+            + config.feature_matching_weight * fm_loss
+        )
+
     @staticmethod
     def _scalar_metrics(
         accumulated_loss: float,
@@ -374,6 +479,8 @@ class SynthGenTrainer:
         logger.info(f"Starting training: stage={config.stage}, max_steps={config.max_steps}")
 
         self.model.train()
+        if self.discriminator is not None:
+            self.discriminator.train()
         data_iter = iter(self.dataloader)
         accumulated_loss = 0.0
         step_start_time = time.time()
@@ -416,6 +523,15 @@ class SynthGenTrainer:
                         )
                         losses = model.compute_loss(audio, captions, durations)
 
+                # Adversarial terms for the VAE stage: discriminator update
+                # plus generator adversarial + feature-matching losses.
+                if (
+                    config.stage == "vae"
+                    and self.discriminator is not None
+                    and self.global_step >= config.adv_start_step
+                ):
+                    self._adversarial_step(reconstruction, target, losses, amp_dtype)
+
                 last_losses = losses
                 loss = losses["loss"] / config.gradient_accumulation_steps
 
@@ -435,15 +551,29 @@ class SynthGenTrainer:
                             self.model.parameters(), max_norm=1.0
                         )
                         self.scaler.step(self.optimizer)
+                        if self.disc_optimizer is not None:
+                            self.scaler.unscale_(self.disc_optimizer)
+                            torch.nn.utils.clip_grad_norm_(
+                                self.discriminator.parameters(), max_norm=1.0
+                            )
+                            self.scaler.step(self.disc_optimizer)
                         self.scaler.update()
                     else:
                         torch.nn.utils.clip_grad_norm_(
                             self.model.parameters(), max_norm=1.0
                         )
                         self.optimizer.step()
+                        if self.disc_optimizer is not None:
+                            torch.nn.utils.clip_grad_norm_(
+                                self.discriminator.parameters(), max_norm=1.0
+                            )
+                            self.disc_optimizer.step()
 
                     self.scheduler.step()
                     self.optimizer.zero_grad()
+                    if self.disc_optimizer is not None:
+                        self.disc_scheduler.step()
+                        self.disc_optimizer.zero_grad()
 
                 self.global_step += 1
 
@@ -512,6 +642,16 @@ class SynthGenTrainer:
         if self.scaler:
             checkpoint["scaler_state_dict"] = self.scaler.state_dict()
 
+        if self.discriminator is not None:
+            disc_state = (
+                self.discriminator.module.state_dict()
+                if isinstance(self.discriminator, DDP)
+                else self.discriminator.state_dict()
+            )
+            checkpoint["discriminator_state_dict"] = disc_state
+            checkpoint["disc_optimizer_state_dict"] = self.disc_optimizer.state_dict()
+            checkpoint["disc_scheduler_state_dict"] = self.disc_scheduler.state_dict()
+
         torch.save(checkpoint, checkpoint_path)
         logger.info(f"Saved checkpoint: {checkpoint_path}")
         self.tracker.log_checkpoint_ref(str(checkpoint_path), step=self.global_step)
@@ -541,6 +681,23 @@ class SynthGenTrainer:
 
         if self.scaler and "scaler_state_dict" in checkpoint:
             self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+
+        if (
+            self.discriminator is not None
+            and "discriminator_state_dict" in checkpoint
+        ):
+            disc = (
+                self.discriminator.module
+                if isinstance(self.discriminator, DDP)
+                else self.discriminator
+            )
+            disc.load_state_dict(checkpoint["discriminator_state_dict"])
+            self.disc_optimizer.load_state_dict(
+                checkpoint["disc_optimizer_state_dict"]
+            )
+            self.disc_scheduler.load_state_dict(
+                checkpoint["disc_scheduler_state_dict"]
+            )
 
         logger.info(f"Resumed from step {self.global_step}")
 
