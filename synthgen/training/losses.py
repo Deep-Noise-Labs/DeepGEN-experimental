@@ -166,6 +166,65 @@ class VAELoss(nn.Module):
 
 
 # =============================================================================
+# Adversarial Losses (VAE stage)
+# =============================================================================
+
+
+class DiscriminatorLoss(nn.Module):
+    """
+    Hinge loss for the multi-scale STFT discriminator.
+
+    L_D = mean over scales of  E[relu(1 - D(real))] + E[relu(1 + D(fake))]
+    """
+
+    def forward(
+        self,
+        logits_real: list[torch.Tensor],
+        logits_fake: list[torch.Tensor],
+    ) -> torch.Tensor:
+        loss = 0.0
+        for real, fake in zip(logits_real, logits_fake):
+            loss = loss + F.relu(1.0 - real).mean() + F.relu(1.0 + fake).mean()
+        return loss / max(len(logits_real), 1)
+
+
+class GeneratorAdversarialLoss(nn.Module):
+    """
+    Generator-side adversarial loss with feature matching.
+
+    Components (averaged over discriminator scales):
+    - Hinge adversarial term: E[relu(1 - D(fake))].
+    - Feature matching: L1 distance between real and fake intermediate
+      discriminator feature maps, normalised per layer by the mean
+      magnitude of the real features (as in EnCodec) so no single layer
+      dominates.
+    """
+
+    def forward(
+        self,
+        logits_fake: list[torch.Tensor],
+        features_real: list[list[torch.Tensor]],
+        features_fake: list[list[torch.Tensor]],
+    ) -> dict[str, torch.Tensor]:
+        adv_loss = 0.0
+        for fake in logits_fake:
+            adv_loss = adv_loss + F.relu(1.0 - fake).mean()
+        adv_loss = adv_loss / max(len(logits_fake), 1)
+
+        fm_loss = 0.0
+        num_layers = 0
+        for feats_real, feats_fake in zip(features_real, features_fake):
+            for real, fake in zip(feats_real, feats_fake):
+                real = real.detach()
+                scale = real.abs().mean().clamp(min=1e-6)
+                fm_loss = fm_loss + F.l1_loss(fake, real) / scale
+                num_layers += 1
+        fm_loss = fm_loss / max(num_layers, 1)
+
+        return {"adv_loss": adv_loss, "feature_matching_loss": fm_loss}
+
+
+# =============================================================================
 # DiT Losses
 # =============================================================================
 
