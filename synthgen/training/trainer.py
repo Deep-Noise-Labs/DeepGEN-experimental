@@ -121,6 +121,7 @@ class TrainingConfig:
     timestep_sampling: str = "logit_normal"
     timestep_logit_mean: float = 0.0
     timestep_logit_std: float = 1.0
+    timestep_uniform_mix_prob: float = 0.25
 
     # Logging / experiment tracking
     log_every_steps: int = 100
@@ -265,6 +266,7 @@ class SynthGenTrainer:
                 timestep_sampling=config.timestep_sampling,
                 timestep_logit_mean=config.timestep_logit_mean,
                 timestep_logit_std=config.timestep_logit_std,
+                timestep_uniform_mix_prob=config.timestep_uniform_mix_prob,
                 use_dummy_text_encoder=False,
             ).to(self.device)
 

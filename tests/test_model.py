@@ -215,12 +215,31 @@ class TestTimestepSampling:
         assert (t > 0).all() and (t < 1).all()
 
     def test_logit_normal_concentrates_mid_timesteps(self):
-        # For t = sigmoid(N(0,1)), P(0.25 < t < 0.75) ~ 0.73 vs 0.5 for uniform.
+        # Pure logit-normal: P(0.25 < t < 0.75) ~ 0.73 vs 0.5 for uniform.
         torch.manual_seed(0)
-        scheduler = ConditionalFlowMatchingScheduler(timestep_sampling="logit_normal")
+        scheduler = ConditionalFlowMatchingScheduler(
+            timestep_sampling="logit_normal", uniform_mix_prob=0.0
+        )
         t = scheduler.sample_timestep(batch_size=20000, device=torch.device("cpu"))
         mid_fraction = ((t > 0.25) & (t < 0.75)).float().mean().item()
         assert mid_fraction > 0.65
+
+    def test_default_mixture_keeps_tail_coverage(self):
+        # The 25% uniform floor must keep the extremes covered: for the
+        # default mixture, P(t > 0.9) ~ 0.25*0.10 + 0.75*0.014 ~ 0.035,
+        # vs ~0.014 for pure logit-normal and 0.10 for uniform.
+        torch.manual_seed(0)
+        scheduler = ConditionalFlowMatchingScheduler()
+        assert scheduler.uniform_mix_prob == 0.25
+        t = scheduler.sample_timestep(batch_size=50000, device=torch.device("cpu"))
+        tail_fraction = (t > 0.9).float().mean().item()
+        assert 0.028 < tail_fraction < 0.045
+        mid_fraction = ((t > 0.25) & (t < 0.75)).float().mean().item()
+        assert mid_fraction > 0.6
+
+    def test_invalid_mix_prob_rejected(self):
+        with pytest.raises(ValueError):
+            ConditionalFlowMatchingScheduler(uniform_mix_prob=1.5)
 
     def test_uniform_mode_preserved(self):
         torch.manual_seed(0)

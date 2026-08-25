@@ -41,27 +41,39 @@ class ConditionalFlowMatchingScheduler:
         timestep_sampling: str = "logit_normal",
         logit_mean: float = 0.0,
         logit_std: float = 1.0,
+        uniform_mix_prob: float = 0.25,
     ):
         """
         Args:
             sigma_min: Minimum noise level for numerical stability.
             timestep_sampling: Training-time timestep distribution.
-                - "logit_normal": t = sigmoid(n), n ~ N(logit_mean, logit_std).
+                - "logit_normal": t = sigmoid(n), n ~ N(logit_mean, logit_std),
+                  mixed with a uniform floor (see uniform_mix_prob).
                   Concentrates training on intermediate timesteps, where the
                   velocity target is hardest to predict (SD3, arXiv:2403.03206).
                 - "uniform": t ~ U(0, 1) (legacy behaviour).
             logit_mean: Mean of the underlying normal (logit-normal only).
             logit_std: Std of the underlying normal (logit-normal only).
+            uniform_mix_prob: With logit-normal sampling, probability of drawing
+                a uniform timestep instead. The floor guarantees coverage of the
+                path extremes; pure logit-normal (prob 0.0) undersamples t near
+                0 and 1 and measurably degrades the final denoising steps that
+                clean decays and silences. 0.25 validated in-repo; see PR notes.
         """
         if timestep_sampling not in ("logit_normal", "uniform"):
             raise ValueError(
                 f"Unknown timestep_sampling: {timestep_sampling!r} "
                 "(expected 'logit_normal' or 'uniform')"
             )
+        if not 0.0 <= uniform_mix_prob <= 1.0:
+            raise ValueError(
+                f"uniform_mix_prob must be in [0, 1], got {uniform_mix_prob}"
+            )
         self.sigma_min = sigma_min
         self.timestep_sampling = timestep_sampling
         self.logit_mean = logit_mean
         self.logit_std = logit_std
+        self.uniform_mix_prob = uniform_mix_prob
 
     def sample_timestep(self, batch_size: int, device: torch.device) -> torch.Tensor:
         """
@@ -69,11 +81,17 @@ class ConditionalFlowMatchingScheduler:
 
         With logit-normal sampling, mid-range timesteps are drawn far more
         often than the near-noise/near-data extremes, which improves sample
-        quality at equal training compute.
+        quality at equal training compute; the uniform floor keeps the
+        extremes covered so decays and silences stay clean.
         """
         if self.timestep_sampling == "logit_normal":
             n = torch.randn(batch_size, device=device)
-            return torch.sigmoid(n * self.logit_std + self.logit_mean)
+            t = torch.sigmoid(n * self.logit_std + self.logit_mean)
+            if self.uniform_mix_prob > 0:
+                t_uniform = torch.rand(batch_size, device=device)
+                pick = torch.rand(batch_size, device=device) < self.uniform_mix_prob
+                t = torch.where(pick, t_uniform, t)
+            return t
         return torch.rand(batch_size, device=device)
 
     def add_noise(
@@ -215,6 +233,7 @@ class SynthGen(nn.Module):
         timestep_sampling: str = "logit_normal",
         timestep_logit_mean: float = 0.0,
         timestep_logit_std: float = 1.0,
+        timestep_uniform_mix_prob: float = 0.25,
         # Use dummy text encoder for testing
         use_dummy_text_encoder: bool = False,
     ):
@@ -261,6 +280,7 @@ class SynthGen(nn.Module):
             timestep_sampling=timestep_sampling,
             logit_mean=timestep_logit_mean,
             logit_std=timestep_logit_std,
+            uniform_mix_prob=timestep_uniform_mix_prob,
         )
 
     def compute_loss(
