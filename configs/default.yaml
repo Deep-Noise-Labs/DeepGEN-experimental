@@ -52,3 +52,12 @@ num_workers: 8
 
 # Classifier-Free Guidance
 cfg_dropout_prob: 0.1
+
+# Perceptual + adversarial VAE objective (stage="vae" only)
+vae_adversarial: true
+mel_weight: 1.0
+adv_start_step: 2000
+adv_weight: 1.0
+feature_matching_weight: 2.0
+disc_learning_rate: 1.0e-4
+disc_channels: 32

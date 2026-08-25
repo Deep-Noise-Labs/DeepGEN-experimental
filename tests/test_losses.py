@@ -50,6 +50,27 @@ class TestVAELoss:
         assert "kl_loss" in losses
         assert all(v.item() >= 0 for v in losses.values())
 
+    def test_mel_loss_component_when_enabled(self):
+        loss_fn = VAELoss(mel_weight=1.0, sample_rate=22050)
+        reconstruction = torch.randn(2, 2, 4096)
+        target = torch.randn(2, 2, 4096)
+        mean = torch.randn(2, 64, 16)
+        log_var = torch.randn(2, 64, 16)
+
+        losses = loss_fn(reconstruction, target, mean, log_var)
+        assert "mel_loss" in losses
+        assert losses["mel_loss"].item() > 0
+
+    def test_mel_loss_absent_by_default(self):
+        loss_fn = VAELoss()
+        losses = loss_fn(
+            torch.randn(2, 2, 4096),
+            torch.randn(2, 2, 4096),
+            torch.randn(2, 64, 16),
+            torch.randn(2, 64, 16),
+        )
+        assert "mel_loss" not in losses
+
     def test_kl_loss_zero_for_standard_normal(self):
         loss_fn = VAELoss()
         reconstruction = torch.zeros(2, 2, 4096)
