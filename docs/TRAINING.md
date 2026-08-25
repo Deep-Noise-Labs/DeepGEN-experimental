@@ -45,6 +45,8 @@ The first stage involves training the Audio VAE to compress raw audio waveforms 
 
 The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 64-dimensional latent space. It is trained using a combination of L1 reconstruction loss, Multi-resolution STFT loss, and KL divergence loss.
 
+The spectral loss covers STFT resolutions from 64 to 8192 samples (sub-bass pitch resolution at the long end, attack-transient localisation at the short end) and adds a mid/side (sum and difference) log-magnitude term so stereo-image errors are penalised. `scripts/loss_audition_demo.py` renders listenable degradation pairs and scores them with the previous and current objective - run it to hear exactly which defects each objective can and cannot detect.
+
 ### Configuration
 
 Ready-made AudioCaps validation configs live in the repo:

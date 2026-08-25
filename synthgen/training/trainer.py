@@ -414,7 +414,9 @@ class SynthGenTrainer:
                             if isinstance(self.model, DDP)
                             else self.model
                         )
-                        losses = model.compute_loss(audio, captions, durations)
+                        losses = model.compute_loss(
+                            audio, captions, durations, loss_fn=self.loss_fn
+                        )
 
                 last_losses = losses
                 loss = losses["loss"] / config.gradient_accumulation_steps
