@@ -95,14 +95,174 @@ class MultiResolutionSTFTLoss(nn.Module):
         return total_loss / len(self.fft_sizes)
 
 
+def _mel_filterbank(
+    sample_rate: int,
+    n_fft: int,
+    n_mels: int,
+    fmin: float = 0.0,
+    fmax: Optional[float] = None,
+) -> torch.Tensor:
+    """
+    Build a triangular mel filterbank matrix (HTK mel scale), pure torch.
+
+    Returns:
+        Tensor of shape (n_mels, n_fft // 2 + 1).
+    """
+    fmax = fmax or sample_rate / 2
+
+    def hz_to_mel(f):
+        return 2595.0 * math.log10(1.0 + f / 700.0)
+
+    def mel_to_hz(m):
+        return 700.0 * (10.0 ** (m / 2595.0) - 1.0)
+
+    mel_points = torch.linspace(hz_to_mel(fmin), hz_to_mel(fmax), n_mels + 2)
+    hz_points = torch.tensor([mel_to_hz(m.item()) for m in mel_points])
+    bins = torch.floor((n_fft + 1) * hz_points / sample_rate).long()
+    bins = torch.clamp(bins, 0, n_fft // 2)
+
+    fbank = torch.zeros(n_mels, n_fft // 2 + 1)
+    for i in range(n_mels):
+        left, center, right = bins[i], bins[i + 1], bins[i + 2]
+        if center > left:
+            fbank[i, left:center] = (
+                torch.arange(left, center) - left
+            ).float() / max(1, (center - left).item())
+        if right > center:
+            fbank[i, center:right] = (
+                right - torch.arange(center, right)
+            ).float() / max(1, (right - center).item())
+    return fbank
+
+
+class MultiScaleMelSpectrogramLoss(nn.Module):
+    """
+    Multi-scale log-mel spectrogram loss (DAC / Stable Audio recipe).
+
+    L1 distance between log-mel spectrograms at several FFT resolutions.
+    Compared to a linear-frequency magnitude loss, the mel warping spends
+    its capacity where hearing does, so errors in the perceptually dense
+    low/mid bands are weighted appropriately while the loss still covers
+    the full bandwidth at every scale.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int = 44100,
+        fft_sizes: tuple = (2048, 1024, 512, 256, 128),
+        n_mels: tuple = (160, 80, 40, 20, 10),
+        clamp_eps: float = 1e-5,
+    ):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.fft_sizes = fft_sizes
+        self.clamp_eps = clamp_eps
+
+        for i, (fft_size, mels) in enumerate(zip(fft_sizes, n_mels)):
+            self.register_buffer(
+                f"fbank_{i}",
+                _mel_filterbank(sample_rate, fft_size, mels),
+                persistent=False,
+            )
+            self.register_buffer(
+                f"window_{i}", torch.hann_window(fft_size), persistent=False
+            )
+
+    def _log_mel(self, x: torch.Tensor, index: int) -> torch.Tensor:
+        fft_size = self.fft_sizes[index]
+        if x.dim() == 3:
+            batch, channels, samples = x.shape
+            x = x.reshape(batch * channels, samples)
+
+        window = getattr(self, f"window_{index}")
+        fbank = getattr(self, f"fbank_{index}")
+
+        stft = torch.stft(
+            x,
+            n_fft=fft_size,
+            hop_length=fft_size // 4,
+            win_length=fft_size,
+            window=window,
+            return_complex=True,
+        )
+        magnitude = stft.abs()  # (batch, freq, frames)
+        mel = torch.matmul(fbank, magnitude)
+        return torch.log(mel.clamp(min=self.clamp_eps))
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            pred: Predicted audio (batch, channels, samples).
+            target: Target audio (batch, channels, samples).
+
+        Returns:
+            Scalar loss value.
+        """
+        total_loss = 0.0
+        for i in range(len(self.fft_sizes)):
+            total_loss += F.l1_loss(self._log_mel(pred, i), self._log_mel(target, i))
+        return total_loss / len(self.fft_sizes)
+
+
+# =============================================================================
+# Adversarial Losses (VAE stage)
+# =============================================================================
+
+
+def discriminator_loss(
+    real_logits: list[torch.Tensor],
+    fake_logits: list[torch.Tensor],
+) -> torch.Tensor:
+    """
+    Hinge loss for the discriminator.
+
+    Args:
+        real_logits: Logit maps for real audio, one per resolution.
+        fake_logits: Logit maps for reconstructed audio (detached).
+    """
+    loss = 0.0
+    for real, fake in zip(real_logits, fake_logits):
+        loss += F.relu(1.0 - real).mean() + F.relu(1.0 + fake).mean()
+    return loss / len(real_logits)
+
+
+def generator_adversarial_loss(fake_logits: list[torch.Tensor]) -> torch.Tensor:
+    """Hinge generator loss: push discriminator logits on fakes up."""
+    loss = 0.0
+    for fake in fake_logits:
+        loss += (-fake).mean()
+    return loss / len(fake_logits)
+
+
+def feature_matching_loss(
+    real_features: list[list[torch.Tensor]],
+    fake_features: list[list[torch.Tensor]],
+) -> torch.Tensor:
+    """
+    L1 distance between discriminator feature maps of real and fake audio.
+
+    Stabilises adversarial training and acts as a learned perceptual loss.
+    Real features are detached - the discriminator is not trained by this term.
+    """
+    loss = 0.0
+    count = 0
+    for real_maps, fake_maps in zip(real_features, fake_features):
+        for real, fake in zip(real_maps, fake_maps):
+            loss += F.l1_loss(fake, real.detach())
+            count += 1
+    return loss / max(1, count)
+
+
 class VAELoss(nn.Module):
     """
     Combined VAE loss for audio autoencoder training.
 
     Components:
-    - Reconstruction loss (L1 + multi-resolution STFT)
+    - Reconstruction loss (L1 + multi-resolution STFT + multi-scale log-mel)
     - KL divergence loss
-    - Optional adversarial loss
+
+    Adversarial and feature-matching terms are computed in the trainer
+    (they need the discriminator) and added to the total there.
     """
 
     def __init__(
@@ -111,14 +271,22 @@ class VAELoss(nn.Module):
         kl_weight: float = 1e-4,
         spectral_weight: float = 1.0,
         l1_weight: float = 0.1,
+        mel_weight: float = 0.0,
+        sample_rate: int = 44100,
     ):
         super().__init__()
         self.recon_weight = recon_weight
         self.kl_weight = kl_weight
         self.spectral_weight = spectral_weight
         self.l1_weight = l1_weight
+        self.mel_weight = mel_weight
 
         self.spectral_loss = MultiResolutionSTFTLoss()
+        self.mel_loss = (
+            MultiScaleMelSpectrogramLoss(sample_rate=sample_rate)
+            if mel_weight > 0
+            else None
+        )
 
     def forward(
         self,
@@ -157,12 +325,20 @@ class VAELoss(nn.Module):
             + self.kl_weight * kl_loss
         )
 
-        return {
-            "loss": total_loss,
+        losses = {
             "l1_loss": l1_loss,
             "spectral_loss": spectral_loss,
             "kl_loss": kl_loss,
         }
+
+        # Multi-scale log-mel loss
+        if self.mel_loss is not None:
+            mel_loss = self.mel_loss(reconstruction, target)
+            total_loss = total_loss + self.mel_weight * mel_loss
+            losses["mel_loss"] = mel_loss
+
+        losses["loss"] = total_loss
+        return losses
 
 
 # =============================================================================

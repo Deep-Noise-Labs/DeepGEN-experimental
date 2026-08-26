@@ -43,7 +43,19 @@ Before beginning the training process, you must acquire and prepare the datasets
 
 The first stage involves training the Audio VAE to compress raw audio waveforms into a compact latent space. This step is critical, as the quality of the VAE dictates the maximum possible audio quality of the final generation.
 
-The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 64-dimensional latent space. It is trained using a combination of L1 reconstruction loss, Multi-resolution STFT loss, and KL divergence loss.
+The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 64-dimensional latent space. It is trained using a combination of L1 reconstruction loss, Multi-resolution STFT loss, multi-scale log-mel loss, KL divergence loss, and - once `adv_start_step` is reached - an adversarial objective.
+
+### Perceptual + adversarial objective
+
+Pure regression losses (L1 + magnitude STFT) reward the decoder for predicting the average of all plausible waveforms, which audibly manifests as a dull high end and smeared transients - the opposite of the sample-library quality bar we are aiming for. Following the recipe validated by DAC and Stable Audio, Stage 1 therefore adds:
+
+- **Multi-scale log-mel loss** (`mel_weight`): L1 between log-mel spectrograms at five FFT resolutions, weighting error where hearing is most sensitive.
+- **Multi-resolution complex-STFT discriminator** (`vae_adversarial`): three sub-discriminators over the real/imaginary STFT channels at complementary resolutions, so both phase/transients and fine harmonic structure are adversarially supervised. Trained with hinge loss (`disc_learning_rate`, `disc_channels`).
+- **Feature matching loss** (`feature_matching_weight`): L1 between discriminator feature maps of real and reconstructed audio; stabilises the GAN and acts as a learned perceptual loss.
+
+The discriminator switches on at `adv_start_step` (default 2000) so the reconstruction losses first pull the decoder into a sensible regime. When resuming a pre-adversarial checkpoint, the discriminator starts fresh - this is expected and matches the DAC training procedure. Set `vae_adversarial: false` to recover the old purely-regressive objective. Watch `disc_loss` alongside `adv_loss`: a healthy run keeps `disc_loss` roughly in the 1.4-2.0 band; `disc_loss` collapsing toward 0 means the discriminator is winning and the adversarial gradient is vanishing.
+
+**Keep the adversarial term small relative to reconstruction (~15:1, as in DAC).** In the scaled-down A/B study (`scripts/ab_vae_objective.py`), `adv_weight: 1.0` destabilised training (KL spikes at GAN onset, oscillating spectral loss) and made held-out reconstruction *worse* than the baseline; rebalancing to `adv_weight: 0.2`, `feature_matching_weight: 1.0` with `disc_learning_rate` at half the generator LR recovered stability and beat the baseline on held-out mel, high-frequency and linear-STFT distance. If you raise `mel_weight`, you can raise `adv_weight` proportionally.
 
 ### Configuration
 

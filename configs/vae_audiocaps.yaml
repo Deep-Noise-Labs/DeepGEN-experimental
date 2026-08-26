@@ -20,6 +20,17 @@ checkpoint_dir: "./checkpoints/vae_audiocaps"
 save_every_steps: 1000
 resume_from: null
 
+# Perceptual + adversarial objective (DAC / Stable Audio recipe).
+# The discriminator switches on after adv_start_step so the reconstruction
+# losses first pull the decoder into a sensible regime.
+vae_adversarial: true
+mel_weight: 1.0
+adv_start_step: 2000
+adv_weight: 0.2
+feature_matching_weight: 1.0
+disc_learning_rate: 1.0e-4
+disc_channels: 32
+
 log_every_steps: 50
 eval_every_steps: 1000
 use_clearml: false
