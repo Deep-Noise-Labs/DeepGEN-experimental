@@ -128,11 +128,14 @@ class TrainingConfig:
     # The VAE bounds the fidelity of the whole system; these terms follow the
     # DAC / Stable Audio recipe (multi-scale log-mel + multi-resolution STFT
     # discriminator with feature matching).
+    # Keep the adversarial term small next to reconstruction (~15:1, as in
+    # DAC): adv_weight 1.0 destabilised training in the A/B study
+    # (scripts/ab_vae_objective.py) and hurt held-out fidelity.
     vae_adversarial: bool = True
     mel_weight: float = 1.0
     adv_start_step: int = 2000
-    adv_weight: float = 1.0
-    feature_matching_weight: float = 2.0
+    adv_weight: float = 0.2
+    feature_matching_weight: float = 1.0
     disc_learning_rate: float = 1e-4
     disc_channels: int = 32
 

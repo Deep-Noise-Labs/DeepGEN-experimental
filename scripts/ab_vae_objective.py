@@ -191,6 +191,7 @@ def train_vae(
     name: str,
     train_data: torch.Tensor,
     args,
+    mel_weight: float,
     adversarial: bool,
 ) -> tuple[AudioVAE, list[dict]]:
     """Train one VAE; returns the model and per-log-step metric history."""
@@ -198,7 +199,7 @@ def train_vae(
     model = build_vae(args.seed, args.latent_dim, args.base_channels).to(device)
 
     loss_fn = VAELoss(
-        mel_weight=1.0 if adversarial else 0.0,
+        mel_weight=mel_weight,
         sample_rate=args.sample_rate,
     ).to(device)
 
@@ -211,7 +212,7 @@ def train_vae(
             channels=args.disc_channels,
         ).to(device)
         disc_optimizer = torch.optim.AdamW(
-            discriminator.parameters(), lr=args.lr, betas=(0.8, 0.99)
+            discriminator.parameters(), lr=args.disc_lr, betas=(0.8, 0.99)
         )
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95))
@@ -346,8 +347,19 @@ def main():
     parser.add_argument("--base-channels", type=int, default=16)
     parser.add_argument("--disc-channels", type=int, default=16)
     parser.add_argument("--lr", type=float, default=2e-4)
-    parser.add_argument("--adv-weight", type=float, default=1.0)
-    parser.add_argument("--feature-matching-weight", type=float, default=2.0)
+    parser.add_argument("--disc-lr", type=float, default=1e-4)
+    # Keep the adversarial term small next to reconstruction (DAC uses a
+    # roughly 15:1 recon:adv balance); a strong discriminator destabilises
+    # training and hurts held-out fidelity.
+    parser.add_argument("--adv-weight", type=float, default=0.2)
+    parser.add_argument("--feature-matching-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--arms",
+        type=str,
+        default="baseline,improved",
+        help="Comma list from: baseline (old objective), mel (adds "
+        "multi-scale mel only), improved (mel + adversarial)",
+    )
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cpu")
@@ -364,10 +376,20 @@ def main():
     for name, clip in test_clips.items():
         save_wav(out_dir / "audio" / f"{name}_original.wav", clip, args.sample_rate)
 
+    arm_defs = {
+        "baseline": {"mel_weight": 0.0, "adversarial": False},
+        "mel": {"mel_weight": 1.0, "adversarial": False},
+        "improved": {"mel_weight": 1.0, "adversarial": True},
+    }
+    arms = [a.strip() for a in args.arms.split(",") if a.strip()]
+
     results = {"args": vars(args)}
-    for label, adversarial in [("baseline", False), ("improved", True)]:
+    for label in arms:
+        spec = arm_defs[label]
         print(f"\n=== Training {label} objective ===", flush=True)
-        model, history = train_vae(label, train_data, args, adversarial)
+        model, history = train_vae(
+            label, train_data, args, spec["mel_weight"], spec["adversarial"]
+        )
         recons, metrics = evaluate(model, test_clips, args.sample_rate)
         for name, recon in recons.items():
             save_wav(
@@ -376,7 +398,7 @@ def main():
         results[label] = {"history": history, "metrics": metrics}
 
     # Aggregate
-    for label in ("baseline", "improved"):
+    for label in arms:
         m = results[label]["metrics"]
         results[label]["mean_metrics"] = {
             key: sum(v[key] for v in m.values()) / len(m)
@@ -387,7 +409,7 @@ def main():
         json.dump(results, f, indent=2)
 
     print("\n=== Mean held-out metrics ===")
-    for label in ("baseline", "improved"):
+    for label in arms:
         print(label, results[label]["mean_metrics"])
     print(f"\nWAVs and results.json written to {out_dir}")
 
