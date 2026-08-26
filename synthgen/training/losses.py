@@ -3,6 +3,8 @@ Loss functions for SynthGen training.
 
 Includes losses for:
 - VAE training (reconstruction + KL + spectral + adversarial)
+- Adversarial VAE training (hinge GAN + feature matching, with the
+  multi-scale STFT discriminator in synthgen.model.discriminator)
 - DiT training (flow matching velocity MSE)
 """
 
@@ -163,6 +165,83 @@ class VAELoss(nn.Module):
             "spectral_loss": spectral_loss,
             "kl_loss": kl_loss,
         }
+
+
+# =============================================================================
+# Adversarial VAE Losses
+# =============================================================================
+
+
+def discriminator_loss(
+    real_logits: list[torch.Tensor],
+    fake_logits: list[torch.Tensor],
+) -> torch.Tensor:
+    """
+    Hinge loss for the discriminator, averaged over scales.
+
+    Pushes real logits above +1 and fake logits below -1.
+
+    Args:
+        real_logits: Per-scale logit maps for real audio.
+        fake_logits: Per-scale logit maps for reconstructed audio
+            (detached from the generator graph).
+
+    Returns:
+        Scalar discriminator loss.
+    """
+    loss = 0.0
+    for real, fake in zip(real_logits, fake_logits):
+        loss = loss + F.relu(1.0 - real).mean() + F.relu(1.0 + fake).mean()
+    return loss / len(real_logits)
+
+
+def generator_adversarial_loss(fake_logits: list[torch.Tensor]) -> torch.Tensor:
+    """
+    Hinge generator loss, averaged over scales.
+
+    Pushes the discriminator's logits on reconstructions upward.
+
+    Args:
+        fake_logits: Per-scale logit maps for reconstructed audio
+            (with gradients flowing back to the generator).
+
+    Returns:
+        Scalar generator adversarial loss.
+    """
+    loss = 0.0
+    for fake in fake_logits:
+        loss = loss - fake.mean()
+    return loss / len(fake_logits)
+
+
+def feature_matching_loss(
+    fake_features: list[list[torch.Tensor]],
+    real_features: list[list[torch.Tensor]],
+) -> torch.Tensor:
+    """
+    Feature matching loss between discriminator activations.
+
+    L1 distance between the discriminator's intermediate feature maps for
+    real and reconstructed audio, normalized per layer by the mean
+    magnitude of the real features (as in EnCodec). This stabilizes GAN
+    training and acts as a learned perceptual reconstruction loss.
+
+    Args:
+        fake_features: Per-scale lists of feature maps for reconstructions.
+        real_features: Per-scale lists of feature maps for real audio
+            (detached; no gradients flow into the discriminator).
+
+    Returns:
+        Scalar feature matching loss.
+    """
+    loss = 0.0
+    num_layers = 0
+    for scale_fake, scale_real in zip(fake_features, real_features):
+        for fake, real in zip(scale_fake, scale_real):
+            real = real.detach()
+            loss = loss + F.l1_loss(fake, real) / (real.abs().mean() + 1e-8)
+            num_layers += 1
+    return loss / max(num_layers, 1)
 
 
 # =============================================================================
