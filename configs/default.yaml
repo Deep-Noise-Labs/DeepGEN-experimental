@@ -52,3 +52,13 @@ num_workers: 8
 
 # Classifier-Free Guidance
 cfg_dropout_prob: 0.1
+
+# Adversarial VAE training (stage "vae" only)
+# The discriminator switches on at adv_start_step; before that, training is
+# identical to the previous purely-spectral objective.
+adversarial: true
+adv_start_step: 20000
+adv_weight: 1.0
+feature_matching_weight: 5.0
+disc_learning_rate: 1.0e-4
+disc_fft_sizes: [2048, 1024, 512, 256, 128]

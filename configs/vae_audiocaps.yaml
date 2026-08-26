@@ -35,3 +35,12 @@ wandb_project: "synthgen"
 data_dir: "./data/audiocaps"
 num_workers: 4
 max_samples: null
+
+# Adversarial fine-tune: pipeline-validation budget is 10k steps, so switch
+# the discriminator on at 4k once reconstruction has stabilised.
+adversarial: true
+adv_start_step: 4000
+adv_weight: 1.0
+feature_matching_weight: 5.0
+disc_learning_rate: 1.0e-4
+disc_fft_sizes: [2048, 1024, 512, 256, 128]

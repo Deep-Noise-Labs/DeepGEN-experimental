@@ -30,6 +30,7 @@ The architecture draws from state-of-the-art research in text-to-audio generatio
 
 - Text-conditioned generation of short audio samples (3–15 seconds)
 - 44.1 kHz stereo output for production-quality audio
+- Adversarial VAE training (multi-scale STFT discriminator + feature matching) for crisp transients and clean high frequencies
 - Support for both synthetic and acoustic instrument timbres
 - Variable-length generation with timing conditioning
 - Efficient inference via flow matching (10–25 steps)

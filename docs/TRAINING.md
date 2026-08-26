@@ -43,7 +43,20 @@ Before beginning the training process, you must acquire and prepare the datasets
 
 The first stage involves training the Audio VAE to compress raw audio waveforms into a compact latent space. This step is critical, as the quality of the VAE dictates the maximum possible audio quality of the final generation.
 
-The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 64-dimensional latent space. It is trained using a combination of L1 reconstruction loss, Multi-resolution STFT loss, and KL divergence loss.
+The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 64-dimensional latent space. It is trained using a combination of L1 reconstruction loss, Multi-resolution STFT loss, and KL divergence loss, followed by an adversarial phase with a multi-scale STFT discriminator.
+
+### Adversarial training (why and how)
+
+Purely spectral objectives are magnitude-based: they are blind to phase coherence and reward the decoder for averaging over plausible reconstructions. Audibly this means smeared transients (soft plucks and drum hits), dull or "phasey" high frequencies, and metallic, "swishy" noise textures. Every state-of-the-art neural audio autoencoder (EnCodec, Descript Audio Codec, Stable Audio) closes this gap with an adversarial objective, and SynthGen now does the same:
+
+- A **multi-scale complex-STFT discriminator** (`synthgen/model/discriminator.py`, EnCodec-style) scores real vs. reconstructed audio at five STFT resolutions, so both harmonic structure (long windows) and transients (short windows) are covered.
+- The generator (VAE) adds a **hinge adversarial loss** and a **feature matching loss** (L1 on discriminator activations, normalized per layer) on top of the existing spectral losses.
+- The discriminator switches on at `adv_start_step` (default 20k). Before that step, training is exactly the previous purely-spectral objective, so smoke runs and early training behave identically. Recommended schedule: let reconstruction stabilise for the first ~20-30% of the step budget, then run adversarial for the remainder.
+- The discriminator has its own AdamW optimizer (constant `disc_learning_rate`, betas 0.8/0.99) and steps every batch; gradient accumulation applies to the generator only. Discriminator and its optimizer state are saved in and restored from checkpoints.
+
+Relevant config keys (see `configs/default.yaml`): `adversarial`, `adv_start_step`, `adv_weight`, `feature_matching_weight`, `disc_learning_rate`, `disc_fft_sizes`. Logged scalars during the adversarial phase: `d_loss`, `g_adv_loss`, `fm_loss`.
+
+Note that once the adversarial phase starts, the total `loss` scalar is no longer comparable with the pre-adversarial value - watch `spectral_loss` for reconstruction quality and `d_loss` / `g_adv_loss` for adversarial balance (a healthy run keeps `d_loss` well away from 0, which would mean the discriminator has won).
 
 ### Configuration
 
