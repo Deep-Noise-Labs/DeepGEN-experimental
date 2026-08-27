@@ -6,15 +6,34 @@ sample_rate: 44100
 audio_channels: 2
 max_duration: 15.0
 
-# 15s stereo @ 44.1kHz with multi-res STFT is memory-heavy; keep micro-batch small
+# 15s stereo @ 44.1kHz with multi-res STFT + a discriminator is memory-heavy;
+# keep the micro-batch small.
 batch_size: 2
 gradient_accumulation_steps: 8
+# Optimizer steps, not micro-batches: this run sees 10000 x 8 = 80k clips.
 learning_rate: 1.0e-4
 weight_decay: 0.01
 max_steps: 10000
 warmup_steps: 500
 min_lr: 1.0e-6
 mixed_precision: "bf16"
+
+# Stage-1 objective
+vae_l1_weight: 0.1
+vae_spectral_weight: 1.0
+vae_mel_weight: 15.0
+vae_kl_weight: 1.0e-4
+vae_adv_weight: 1.0
+vae_fm_weight: 2.0
+
+# Adversarial training. On this short validation budget the critic comes in at
+# 15% of the run; on a full-length run leave disc_start_step nearer 5000.
+adversarial: true
+disc_start_step: 1500
+disc_learning_rate: 1.0e-4
+disc_weight_decay: 0.01
+disc_periods: [2, 3, 5, 7, 11]
+disc_stft_channels: 32
 
 checkpoint_dir: "./checkpoints/vae_audiocaps"
 save_every_steps: 1000

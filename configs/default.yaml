@@ -17,6 +17,8 @@ max_duration: 15.0
 stage: "dit"
 
 # Optimization
+# NOTE: max_steps and warmup_steps count OPTIMIZER steps. One optimizer step
+# consumes gradient_accumulation_steps micro-batches.
 batch_size: 16
 gradient_accumulation_steps: 4
 learning_rate: 1.0e-4
@@ -24,6 +26,23 @@ weight_decay: 0.01
 max_steps: 500000
 warmup_steps: 5000
 min_lr: 1.0e-6
+
+# Stage-1 (VAE) objective weights
+vae_l1_weight: 0.1
+vae_spectral_weight: 1.0
+vae_mel_weight: 15.0
+vae_kl_weight: 1.0e-4
+vae_adv_weight: 1.0
+vae_fm_weight: 2.0
+
+# Stage-1 adversarial training. The critic is engaged only after
+# disc_start_step so the decoder gets a purely reconstructive warm-up first.
+adversarial: true
+disc_start_step: 5000
+disc_learning_rate: 1.0e-4
+disc_weight_decay: 0.01
+disc_periods: [2, 3, 5, 7, 11]
+disc_stft_channels: 32
 
 # Mixed Precision: "no", "fp16", "bf16"
 mixed_precision: "bf16"

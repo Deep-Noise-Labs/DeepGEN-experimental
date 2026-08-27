@@ -26,6 +26,8 @@ The architecture draws from state-of-the-art research in text-to-audio generatio
 
 **Why T5-base?** T5-base provides a strong text understanding backbone that has been validated across multiple audio generation systems (Stable Audio, AudioLDM). It balances quality with computational efficiency.
 
+**Why an adversarial VAE?** The autoencoder is the hard ceiling on output quality — the DiT only ever produces latents, so anything the decoder cannot render is unrecoverable. A purely reconstructive objective (L1 + spectral distances) is a conditional-mean estimator: many waveforms share a magnitude spectrum, and an L-p distance between them is minimised by their average. Averaging over phase smears transients and hollows the stereo image. Stage 1 therefore trains against a multi-period + multi-resolution complex-STFT critic with feature matching, alongside a perceptual multi-scale log-mel term. See [docs/TRAINING.md](docs/TRAINING.md#the-stage-1-objective).
+
 ## Key Features
 
 - Text-conditioned generation of short audio samples (3–15 seconds)
@@ -52,6 +54,7 @@ synthgen-experimental/
 │   ├── training/        # Training logic
 │   │   ├── trainer.py   # Training loop
 │   │   ├── losses.py    # Loss functions
+│   │   ├── discriminator.py  # Stage-1 adversarial critics (MPD + MRD)
 │   │   └── scheduler.py # Learning rate schedulers
 │   ├── inference/       # Inference utilities
 │   │   └── generate.py  # Generation pipeline
@@ -59,6 +62,8 @@ synthgen-experimental/
 │   └── utils/           # Shared utilities
 │       └── audio.py     # Audio I/O utilities
 ├── tests/               # Unit and integration tests
+├── experiments/         # Reproducible ablations
+│   └── vae_objective_ab.py   # Stage-1 objective A/B (before vs after)
 ├── docs/                # Documentation
 │   ├── TRAINING.md      # Training guidelines
 │   ├── CLEARML.md       # ClearML setup and upload policy
