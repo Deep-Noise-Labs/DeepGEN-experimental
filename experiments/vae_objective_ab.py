@@ -47,9 +47,27 @@ from synthgen.training.losses import (
     discriminator_hinge_loss,
     mel_filterbank,
 )
-from synthgen.utils.audio import load_audio, save_audio
+from synthgen.utils.audio import load_audio
 
 SAMPLE_RATE = 44100
+
+
+def save_float_wav(path: Path, audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> None:
+    """
+    Write a 32-bit float WAV.
+
+    Deliberately not 16-bit PCM. An undertrained decoder can sit 30 dB below the
+    target, and at that level 16-bit quantisation noise is loud enough to change
+    the *ordering* of any metric with an unbounded log floor - the log-spectral
+    distance between the two arms reverses. Quantise once, at the point of
+    listening, after level matching; never before measuring.
+    """
+    import soundfile as sf
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if audio.ndim == 2:
+        audio = audio.T
+    sf.write(str(path), audio, sample_rate, subtype="FLOAT")
 
 
 # =============================================================================
@@ -173,18 +191,32 @@ class ReconstructionMetrics:
             )
         )
 
+        # Overall output level relative to the target. An undertrained decoder
+        # under a pure regression loss converges towards near-silence - that is
+        # the safest "average" waveform - so this number is diagnostic in its own
+        # right, and it contaminates every band measurement below if ignored.
+        rms_p = float(torch.sqrt((pred**2).mean()) + 1e-12)
+        rms_t = float(torch.sqrt((target**2).mean()) + 1e-12)
+        output_level_db = 20 * math.log10(rms_p / rms_t)
+
+        # Level-matched copy: isolates spectral *balance* from overall gain.
+        mag_m = self._stft(pred * (rms_t / rms_p))
+
         bands = {
             "lf_0_1k": (0.0, 1000.0),
             "mid_1k_4k": (1000.0, 4000.0),
             "hi_4k_11k": (4000.0, 11000.0),
             "air_11k_22k": (11000.0, 22050.0),
         }
-        band_error = {
-            f"band_db_error_{name}": abs(
-                self._band_db(mag_p, low, high) - self._band_db(mag_t, low, high)
+        band_error = {}
+        for name, (low, high) in bands.items():
+            target_db = self._band_db(mag_t, low, high)
+            band_error[f"band_db_error_{name}"] = abs(
+                self._band_db(mag_p, low, high) - target_db
             )
-            for name, (low, high) in bands.items()
-        }
+            band_error[f"band_db_error_matched_{name}"] = abs(
+                self._band_db(mag_m, low, high) - target_db
+            )
 
         # Transient sharpness: correlation of the onset envelopes. Conditional-mean
         # smearing shows up here before it shows up in any magnitude metric.
@@ -204,6 +236,7 @@ class ReconstructionMetrics:
             "mel_distance": float(self.mel(pred.unsqueeze(0), target.unsqueeze(0))),
             "log_spectral_distance_db": lsd,
             "snr_db": snr,
+            "output_level_db": output_level_db,
             "transient_envelope_corr": transient_corr,
             **band_error,
         }
@@ -430,11 +463,7 @@ def main() -> None:
     results: dict[str, dict] = {}
 
     for stem, crop in eval_crops:
-        save_audio(
-            output_dir / "audio" / f"{stem}__original.wav",
-            crop.numpy(),
-            SAMPLE_RATE,
-        )
+        save_float_wav(output_dir / "audio" / f"{stem}__original.wav", crop.numpy())
         results[stem] = {}
         for name, model in models.items():
             model.eval()
@@ -442,11 +471,7 @@ def main() -> None:
                 latent = model.encode_to_latent(crop.unsqueeze(0))
                 recon = model.decode(latent)[0]
             recon = recon[..., : crop.shape[-1]]
-            save_audio(
-                output_dir / "audio" / f"{stem}__{name}.wav",
-                recon.numpy(),
-                SAMPLE_RATE,
-            )
+            save_float_wav(output_dir / "audio" / f"{stem}__{name}.wav", recon.numpy())
             results[stem][name] = metrics_fn(recon, crop)
 
     # Aggregate: mean per metric per arm.

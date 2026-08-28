@@ -204,7 +204,7 @@ def mel_filterbank(
     if f_max is None:
         f_max = sample_rate / 2.0
 
-    all_freqs = torch.linspace(0, sample_rate // 2, n_freqs, dtype=torch.float64)
+    all_freqs = torch.linspace(0, sample_rate / 2, n_freqs, dtype=torch.float64)
 
     m_min = _hz_to_mel(f_min)
     m_max = _hz_to_mel(f_max)
