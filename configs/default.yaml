@@ -28,6 +28,26 @@ min_lr: 1.0e-6
 # Mixed Precision: "no", "fp16", "bf16"
 mixed_precision: "bf16"
 
+# ---------------------------------------------------------------------------
+# Stage-1 VAE objective
+# The VAE decoder is a hard ceiling on final audio quality — the DiT can never
+# render detail the decoder cannot produce. See docs/VAE_OBJECTIVE.md.
+# ---------------------------------------------------------------------------
+vae_l1_weight: 0.1
+vae_spectral_weight: 1.0    # multi-resolution STFT, 8192 -> 256
+vae_mel_weight: 1.0         # perceptual (mel) frequency weighting
+vae_stereo_weight: 0.25     # mid/side coherence, keeps the stereo image
+vae_kl_weight: 1.0e-4
+
+# Adversarial training of the VAE decoder (complex-STFT critic).
+# Switched on only after the reconstruction objective has converged.
+vae_adversarial: true
+adv_start_step: 20000
+adv_weight: 0.1
+feature_matching_weight: 2.0
+disc_learning_rate: 1.0e-4
+disc_n_ffts: [2048, 1024, 512, 256, 128]
+
 # Checkpointing
 checkpoint_dir: "./checkpoints"
 save_every_steps: 5000
