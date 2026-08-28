@@ -100,6 +100,23 @@ def load_clip(path: str, offset: float, seconds: float) -> np.ndarray:
     return audio
 
 
+def fit_group(clips: dict[str, np.ndarray], headroom: float = 0.9) -> dict[str, np.ndarray]:
+    """
+    Scale a group of related clips by one common factor so none of them clips.
+
+    Phase randomisation raises crest factor, so a candidate can peak well above
+    its source even though nothing was added to it. Writing that to 16-bit
+    clamps it, and the clamping is audible distortion that would be mistaken for
+    the effect under test. Applying a *single* factor across the group keeps
+    every level relationship — including the 1 dB calibration step — intact, and
+    a uniform gain leaves both objectives' scores unchanged: spectral
+    convergence is a ratio, and a constant cancels inside a log difference.
+    """
+    peak = max(float(np.abs(clip).max()) for clip in clips.values())
+    scale = headroom / peak if peak > headroom else 1.0
+    return {name: (clip * scale).astype(np.float32) for name, clip in clips.items()}
+
+
 def to_tensor(audio: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(audio).float().unsqueeze(0)
 
@@ -141,13 +158,18 @@ def run_probe(out_dir: Path, sources: list, seconds: float) -> dict:
     results: dict[str, dict] = {}
 
     for label, path, offset in sources:
-        clip = load_clip(path, offset, seconds)
+        group = {"original": load_clip(path, offset, seconds)}
+        for name, fn in DEGRADATIONS.items():
+            group[name] = np.ascontiguousarray(fn(group["original"]))
+        group = fit_group(group)
+
+        clip = group["original"]
         target = to_tensor(clip)
         save_audio(audio_dir / f"{label}__original.wav", clip, SAMPLE_RATE)
 
         per_source: dict[str, dict] = {}
-        for name, fn in DEGRADATIONS.items():
-            degraded = np.ascontiguousarray(fn(clip))
+        for name in DEGRADATIONS:
+            degraded = group[name]
             save_audio(audio_dir / f"{label}__{name}.wav", degraded, SAMPLE_RATE)
 
             pred = to_tensor(degraded)
@@ -223,13 +245,18 @@ def run_mean_seeking(out_dir: Path, path: str, offset: float, seconds: float) ->
     audio_dir = out_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
 
-    clip = load_clip(path, offset, seconds)
+    group = {"original": load_clip(path, offset, seconds)}
+    for name, fn in MEAN_SEEKING_PAIR.items():
+        group[name] = np.ascontiguousarray(fn(group["original"]))
+    group = fit_group(group)
+
+    clip = group["original"]
     target = to_tensor(clip)
     save_audio(audio_dir / "texture__original.wav", clip, SAMPLE_RATE)
 
     scores: dict[str, dict] = {}
-    for name, fn in MEAN_SEEKING_PAIR.items():
-        candidate = np.ascontiguousarray(fn(clip))
+    for name in MEAN_SEEKING_PAIR:
+        candidate = group[name]
         save_audio(audio_dir / f"texture__{name}.wav", candidate, SAMPLE_RATE)
         pred = to_tensor(candidate)
         scores[name] = {
@@ -369,13 +396,19 @@ def run_training(
     results: dict[str, dict] = {}
     for index, (label, path, offset) in enumerate(sources):
         clip = to_numpy(dataset[index * crops_per_source].unsqueeze(0))
-        save_audio(audio_dir / f"{label}__original.wav", clip, SAMPLE_RATE)
 
         per_source = {"_reference": {"stereo_width": stereo_width(clip)}}
-        for name, vae in models.items():
-            recon = reconstruct(vae, clip)
-            save_audio(audio_dir / f"{label}__{name}.wav", recon, SAMPLE_RATE)
-            per_source[name] = evaluate(recon, clip)
+        # The decoder has no output non-linearity, so a reconstruction can
+        # overshoot the target's peak. Fit the whole group by one factor before
+        # writing, or 16-bit clamping adds distortion that is not the model's.
+        group = fit_group(
+            {"original": clip, **{name: reconstruct(vae, clip)
+                                  for name, vae in models.items()}}
+        )
+        save_audio(audio_dir / f"{label}__original.wav", group["original"], SAMPLE_RATE)
+        for name in models:
+            save_audio(audio_dir / f"{label}__{name}.wav", group[name], SAMPLE_RATE)
+            per_source[name] = evaluate(group[name], group["original"])
         results[label] = per_source
 
     # Aggregate over the whole training set, not just the exported examples.

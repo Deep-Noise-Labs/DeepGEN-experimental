@@ -103,11 +103,11 @@ Mean share across the five sources, spectral terms only:
 
 | Degradation | Old objective | New objective | Change |
 |---|---|---|---|
-| Bass detuned ~2 semitones | 5.9% | 7.0% | **+20%** |
-| Bass rolled off below 80 Hz | 6.1% | 7.3% | **+20%** |
-| Transients smeared | 28.8% | 30.5% | +6% |
+| Bass detuned ~2 semitones | 5.9% | 7.1% | **+21%** |
+| Bass rolled off below 80 Hz | 6.1% | 7.4% | **+21%** |
+| Transients smeared | 28.8% | 30.6% | +6% |
 | Stereo image collapsed to mono | 19.2% | 27.9% | **+46%** |
-| Top-octave phase randomised | 44.4% | 35.9% | **-19%** |
+| Top-octave phase randomised | 44.4% | 35.7% | **-20%** |
 
 That is the intended trade: attention moves out of the top octave and into bass
 tuning, bass weight and the stereo image.
@@ -126,16 +126,18 @@ The probe includes a matched pair scored against the same noise-like target:
 - **`texture_redraw`** — a random all-pass. Every channel's magnitude spectrum
   and the mid/side relationship are preserved *exactly*; only phase changes. On
   noise-like material this is a different realisation of the same texture, and
-  a listener cannot reliably tell it from the original.
+  a listener cannot reliably tell it from the original. (Phase randomisation
+  raises crest factor, so the exported group is scaled by one common factor to
+  keep it out of the clamp — a uniform gain leaves both scores unchanged.)
 - **`spectral_blur`** — magnitudes smoothed in frequency, phase kept. Audibly
   duller. This is what "predict the conditional mean" sounds like.
 
 | Candidate | Old objective | New objective |
 |---|---|---|
 | `texture_redraw` (sounds the same) | 1.36 | 2.07 |
-| `spectral_blur` (audibly duller) | **0.72** | **1.16** |
+| `spectral_blur` (audibly duller) | **0.72** | **1.14** |
 
-Both objectives score the dull candidate as roughly **1.8x better** than the
+Both objectives score the dull candidate **1.8–1.9x better** than the
 perceptually equivalent one. This is the mean-seeking problem, and it is
 structural: a regression loss is minimised by the average of all plausible
 outputs, and the average of many plausible textures is a dull one. No
