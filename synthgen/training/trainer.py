@@ -19,7 +19,7 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
-from torch.cuda.amp import GradScaler, autocast
+from torch.cuda.amp import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 
@@ -29,7 +29,12 @@ from synthgen.tracking import build_tracker
 from synthgen.tracking.dataset_registry import register_dataset_metadata
 from synthgen.tracking.null import NullTracker
 from synthgen.tracking.tracker import ExperimentTracker, config_as_dict, get_clearml_task
-from synthgen.training.losses import FlowMatchingLoss, VAELoss
+from synthgen.training.discriminator import AudioDiscriminator
+from synthgen.training.losses import (
+    FlowMatchingLoss,
+    VAELoss,
+    discriminator_hinge_loss,
+)
 from synthgen.training.scheduler import WarmupCosineScheduler
 
 logger = logging.getLogger(__name__)
@@ -101,9 +106,30 @@ class TrainingConfig:
     gradient_accumulation_steps: int = 4
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
+    # NOTE: max_steps / warmup_steps count *optimizer* steps, not micro-batches.
+    # One optimizer step consumes ``gradient_accumulation_steps`` micro-batches.
     max_steps: int = 500000
     warmup_steps: int = 5000
     min_lr: float = 1e-6
+
+    # Stage-1 VAE objective weights
+    vae_l1_weight: float = 0.1
+    vae_spectral_weight: float = 1.0
+    vae_mel_weight: float = 15.0
+    vae_kl_weight: float = 1e-4
+    vae_adv_weight: float = 1.0
+    vae_fm_weight: float = 2.0
+
+    # Stage-1 adversarial training
+    adversarial: bool = True
+    # Steps of purely reconstructive warm-up before the critic is engaged. The
+    # decoder needs to be roughly in the right place before an adversarial
+    # gradient is useful rather than destructive.
+    disc_start_step: int = 5000
+    disc_learning_rate: float = 1e-4
+    disc_weight_decay: float = 0.01
+    disc_periods: tuple = (2, 3, 5, 7, 11)
+    disc_stft_channels: int = 32
 
     # Mixed precision
     mixed_precision: str = "bf16"  # "no", "fp16", "bf16"
@@ -244,11 +270,31 @@ class SynthGenTrainer:
         """Initialize the model."""
         config = self.config
 
+        # Stage-1 discriminator. Only built for the VAE stage, and only when
+        # adversarial training is enabled.
+        self.discriminator: AudioDiscriminator | None = None
+
         if config.stage == "vae":
             self.model = AudioVAE(
                 in_channels=config.audio_channels,
                 latent_dim=config.vae_latent_dim,
             ).to(self.device)
+
+            if config.adversarial:
+                # Deliberately not wrapped in DDP: the critic is evaluated more
+                # than once per optimizer step (real, fake, and again inside the
+                # generator pass), which does not fit DDP's one-forward-one-
+                # backward reducer contract. Gradients are averaged explicitly
+                # in ``_all_reduce_discriminator_grads`` instead.
+                self.discriminator = AudioDiscriminator(
+                    periods=tuple(config.disc_periods),
+                    stft_channels=config.disc_stft_channels,
+                ).to(self.device)
+                disc_params = sum(
+                    p.numel() for p in self.discriminator.parameters()
+                )
+                logger.info("Discriminator parameters: %s", f"{disc_params:,}")
+                self.tracker.log_params({"discriminator_parameters": disc_params})
         else:
             self.model = SynthGen(
                 vae_latent_dim=config.vae_latent_dim,
@@ -307,6 +353,19 @@ class SynthGenTrainer:
             min_lr=config.min_lr,
         )
 
+        # Discriminator gets its own optimizer. It is deliberately *not* given a
+        # cosine decay: a critic whose learning rate anneals to zero stops
+        # tracking the generator and the adversarial signal goes stale.
+        self.disc_optimizer = None
+        if self.discriminator is not None:
+            self.disc_optimizer = torch.optim.AdamW(
+                self.discriminator.parameters(),
+                lr=config.disc_learning_rate,
+                weight_decay=config.disc_weight_decay,
+                betas=(0.5, 0.9),
+                eps=1e-8,
+            )
+
     def _init_data(self):
         """Initialize data loaders."""
         from synthgen.data.dataset import AudioTextDataset, SynthGenCollator
@@ -339,10 +398,27 @@ class SynthGenTrainer:
 
     def _init_loss(self):
         """Initialize loss functions."""
-        if self.config.stage == "vae":
-            self.loss_fn = VAELoss()
+        config = self.config
+        if config.stage == "vae":
+            self.loss_fn = VAELoss(
+                l1_weight=config.vae_l1_weight,
+                spectral_weight=config.vae_spectral_weight,
+                mel_weight=config.vae_mel_weight,
+                kl_weight=config.vae_kl_weight,
+                adv_weight=config.vae_adv_weight,
+                fm_weight=config.vae_fm_weight,
+                sample_rate=config.sample_rate,
+            ).to(self.device)
         else:
             self.loss_fn = FlowMatchingLoss(weighting="min_snr")
+
+    @property
+    def _adversarial_active(self) -> bool:
+        """True once the reconstructive warm-up is over and a critic exists."""
+        return (
+            self.discriminator is not None
+            and self.global_step >= self.config.disc_start_step
+        )
 
     @staticmethod
     def _scalar_metrics(
@@ -368,109 +444,248 @@ class SynthGenTrainer:
                 metrics[key] = float(value)
         return metrics
 
-    def train(self):
-        """Main training loop."""
+    def _autocast(self):
+        """Autocast context for the configured mixed-precision mode."""
+        amp_dtype = {
+            "bf16": torch.bfloat16,
+            "fp16": torch.float16,
+            "no": None,
+        }[self.config.mixed_precision]
+        return torch.autocast(
+            device_type=self.device.type,
+            dtype=amp_dtype,
+            enabled=(amp_dtype is not None and self.device.type == "cuda"),
+        )
+
+    def _set_discriminator_grad(self, requires_grad: bool) -> None:
+        """Toggle discriminator gradients.
+
+        During the generator pass the critic must be evaluated but not updated,
+        and its parameter gradients must not be polluted by the generator's
+        backward. Toggling ``requires_grad`` is the cheapest way to get that
+        while still allowing gradients to flow *through* the critic into the
+        decoder.
+        """
+        if self.discriminator is None:
+            return
+        for param in self.discriminator.parameters():
+            param.requires_grad_(requires_grad)
+
+    def _generator_micro_step(
+        self,
+        audio: torch.Tensor,
+        captions: list[str],
+        durations: torch.Tensor,
+        adversarial: bool,
+    ) -> tuple[dict[str, Any], tuple[torch.Tensor, torch.Tensor] | None]:
+        """
+        One forward pass of the trained model.
+
+        Returns the loss dict and, for the VAE stage, the ``(target,
+        reconstruction)`` pair the discriminator update needs. The target comes
+        back from the VAE rather than being the input tensor because
+        ``AudioVAE.forward`` trims both to a common length when the transposed
+        convolutions do not land exactly on the input size.
+        """
         config = self.config
-        logger.info(f"Starting training: stage={config.stage}, max_steps={config.max_steps}")
+
+        with self._autocast():
+            if config.stage != "vae":
+                # DDP does not forward custom methods; unwrap when needed
+                model = self.model.module if isinstance(self.model, DDP) else self.model
+                return model.compute_loss(audio, captions, durations), None
+
+            reconstruction, target, mean, log_var = self.model(audio)
+
+            if not adversarial:
+                return (
+                    self.loss_fn(reconstruction, target, mean, log_var),
+                    (target, reconstruction),
+                )
+
+            self._set_discriminator_grad(False)
+            fake_logits, fake_features = self.discriminator(reconstruction)
+            with torch.no_grad():
+                _, real_features = self.discriminator(target)
+
+            losses = self.loss_fn(
+                reconstruction,
+                target,
+                mean,
+                log_var,
+                fake_logits=fake_logits,
+                real_features=real_features,
+                fake_features=fake_features,
+            )
+            return losses, (target, reconstruction)
+
+    def _discriminator_micro_step(
+        self,
+        target: torch.Tensor,
+        reconstruction: torch.Tensor,
+    ) -> torch.Tensor:
+        """Hinge discriminator loss on one micro-batch (already scaled by caller)."""
+        self._set_discriminator_grad(True)
+        with self._autocast():
+            real_logits, _ = self.discriminator(target)
+            fake_logits, _ = self.discriminator(reconstruction.detach())
+            return discriminator_hinge_loss(real_logits, fake_logits)
+
+    def _all_reduce_discriminator_grads(self) -> None:
+        """Average the (non-DDP) discriminator gradients across ranks."""
+        if not self.config.distributed or self.discriminator is None:
+            return
+        for param in self.discriminator.parameters():
+            if param.grad is not None:
+                dist.all_reduce(param.grad, op=dist.ReduceOp.SUM)
+                param.grad /= self.world_size
+
+    def _next_batch(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Fetch the next batch, rolling over to a new epoch when exhausted."""
+        try:
+            return next(state["iter"])
+        except StopIteration:
+            self.epoch += 1
+            if self.config.distributed:
+                self.dataloader.sampler.set_epoch(self.epoch)
+            state["iter"] = iter(self.dataloader)
+            return next(state["iter"])
+
+    def train(self):
+        """
+        Main training loop.
+
+        ``global_step`` counts **optimizer** steps. Each optimizer step consumes
+        ``gradient_accumulation_steps`` micro-batches, so the LR schedule, the
+        checkpoint cadence and ``max_steps`` all refer to the same clock. (Before
+        this was aligned, ``global_step`` counted micro-batches while the
+        scheduler was stepped once per optimizer step, so a cosine schedule
+        configured for ``max_steps`` only ever traversed
+        ``1 / gradient_accumulation_steps`` of its curve and the learning rate
+        never annealed.)
+        """
+        config = self.config
+        logger.info(
+            "Starting training: stage=%s, max_steps=%d (optimizer steps), "
+            "grad_accum=%d, adversarial=%s",
+            config.stage,
+            config.max_steps,
+            config.gradient_accumulation_steps,
+            self.discriminator is not None,
+        )
 
         self.model.train()
-        data_iter = iter(self.dataloader)
-        accumulated_loss = 0.0
+        if self.discriminator is not None:
+            self.discriminator.train()
+
+        state = {"iter": iter(self.dataloader)}
         step_start_time = time.time()
-        last_losses: dict[str, Any] = {}
+        grad_accum = max(1, config.gradient_accumulation_steps)
 
         try:
             while self.global_step < config.max_steps:
-                # Get batch
-                try:
-                    batch = next(data_iter)
-                except StopIteration:
-                    self.epoch += 1
-                    if config.distributed:
-                        self.dataloader.sampler.set_epoch(self.epoch)
-                    data_iter = iter(self.dataloader)
-                    batch = next(data_iter)
+                adversarial = self._adversarial_active
 
-                # Move to device
-                audio = batch["audio"].to(self.device)
-                captions = batch["captions"]
-                durations = batch["durations"].to(self.device)
+                self.optimizer.zero_grad(set_to_none=True)
+                if self.disc_optimizer is not None:
+                    self.disc_optimizer.zero_grad(set_to_none=True)
 
-                # Forward pass with mixed precision
-                amp_dtype = {
-                    "bf16": torch.bfloat16,
-                    "fp16": torch.float16,
-                    "no": None,
-                }[config.mixed_precision]
+                accumulated: dict[str, float] = {}
+                accumulated_loss = 0.0
 
-                with autocast(dtype=amp_dtype, enabled=(amp_dtype is not None)):
-                    if config.stage == "vae":
-                        reconstruction, target, mean, log_var = self.model(audio)
-                        losses = self.loss_fn(reconstruction, target, mean, log_var)
-                    else:
-                        # DDP does not forward custom methods; unwrap when needed
-                        model = (
-                            self.model.module
-                            if isinstance(self.model, DDP)
-                            else self.model
-                        )
-                        losses = model.compute_loss(audio, captions, durations)
+                for _ in range(grad_accum):
+                    batch = self._next_batch(state)
+                    audio = batch["audio"].to(self.device)
+                    captions = batch["captions"]
+                    durations = batch["durations"].to(self.device)
 
-                last_losses = losses
-                loss = losses["loss"] / config.gradient_accumulation_steps
+                    losses, vae_outputs = self._generator_micro_step(
+                        audio, captions, durations, adversarial
+                    )
 
-                # Backward pass
-                if self.scaler:
-                    self.scaler.scale(loss).backward()
-                else:
-                    loss.backward()
-
-                accumulated_loss += loss.item()
-
-                # Optimizer step (with gradient accumulation)
-                if (self.global_step + 1) % config.gradient_accumulation_steps == 0:
+                    loss = losses["loss"] / grad_accum
                     if self.scaler:
-                        self.scaler.unscale_(self.optimizer)
-                        torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), max_norm=1.0
-                        )
-                        self.scaler.step(self.optimizer)
-                        self.scaler.update()
+                        self.scaler.scale(loss).backward()
                     else:
-                        torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), max_norm=1.0
+                        loss.backward()
+
+                    accumulated_loss += float(loss.detach().item())
+                    for key, value in losses.items():
+                        if key == "loss":
+                            continue
+                        accumulated[key] = accumulated.get(key, 0.0) + (
+                            float(value.detach().item()) / grad_accum
+                            if torch.is_tensor(value)
+                            else float(value) / grad_accum
                         )
-                        self.optimizer.step()
 
-                    self.scheduler.step()
-                    self.optimizer.zero_grad()
+                    if adversarial and vae_outputs is not None:
+                        target, reconstruction = vae_outputs
+                        d_loss = self._discriminator_micro_step(target, reconstruction)
+                        d_loss_scaled = d_loss / grad_accum
+                        if self.scaler:
+                            self.scaler.scale(d_loss_scaled).backward()
+                        else:
+                            d_loss_scaled.backward()
+                        accumulated["disc_loss"] = accumulated.get("disc_loss", 0.0) + (
+                            float(d_loss.detach().item()) / grad_accum
+                        )
 
+                # Generator update
+                if self.scaler:
+                    self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                if self.scaler:
+                    self.scaler.step(self.optimizer)
+                else:
+                    self.optimizer.step()
+
+                # Discriminator update
+                if adversarial and self.disc_optimizer is not None:
+                    self._set_discriminator_grad(True)
+                    self._all_reduce_discriminator_grads()
+                    if self.scaler:
+                        self.scaler.unscale_(self.disc_optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        self.discriminator.parameters(), max_norm=1.0
+                    )
+                    if self.scaler:
+                        self.scaler.step(self.disc_optimizer)
+                    else:
+                        self.disc_optimizer.step()
+
+                if self.scaler:
+                    self.scaler.update()
+
+                self.scheduler.step()
                 self.global_step += 1
 
                 # Logging
                 if self.global_step % config.log_every_steps == 0 and self.rank == 0:
                     elapsed = time.time() - step_start_time
-                    steps_per_sec = config.log_every_steps / elapsed
+                    steps_per_sec = config.log_every_steps / max(elapsed, 1e-8)
                     lr = self.scheduler.get_lr()[0]
 
-                    log_msg = (
-                        f"Step {self.global_step}/{config.max_steps} | "
-                        f"Loss: {accumulated_loss:.4f} | "
-                        f"LR: {lr:.2e} | "
-                        f"Steps/s: {steps_per_sec:.2f}"
+                    logger.info(
+                        "Step %d/%d | Loss: %.4f | LR: %.2e | Steps/s: %.2f%s",
+                        self.global_step,
+                        config.max_steps,
+                        accumulated_loss,
+                        lr,
+                        steps_per_sec,
+                        " | adv" if adversarial else "",
                     )
-                    logger.info(log_msg)
 
                     metrics = self._scalar_metrics(
                         accumulated_loss=accumulated_loss,
-                        losses=last_losses,
+                        losses=accumulated,
                         lr=lr,
                         steps_per_sec=steps_per_sec,
                         epoch=self.epoch,
                     )
+                    metrics["adversarial_active"] = float(adversarial)
                     self.tracker.log_metrics(metrics, step=self.global_step)
 
-                    accumulated_loss = 0.0
                     step_start_time = time.time()
 
                 # Save checkpoint
@@ -512,6 +727,13 @@ class SynthGenTrainer:
         if self.scaler:
             checkpoint["scaler_state_dict"] = self.scaler.state_dict()
 
+        # The critic is disposable at inference time but must be kept so an
+        # interrupted adversarial run can resume without restarting the GAN
+        # equilibrium from scratch.
+        if self.discriminator is not None:
+            checkpoint["discriminator_state_dict"] = self.discriminator.state_dict()
+            checkpoint["disc_optimizer_state_dict"] = self.disc_optimizer.state_dict()
+
         torch.save(checkpoint, checkpoint_path)
         logger.info(f"Saved checkpoint: {checkpoint_path}")
         self.tracker.log_checkpoint_ref(str(checkpoint_path), step=self.global_step)
@@ -542,6 +764,21 @@ class SynthGenTrainer:
         if self.scaler and "scaler_state_dict" in checkpoint:
             self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
+        if self.discriminator is not None:
+            if "discriminator_state_dict" in checkpoint:
+                self.discriminator.load_state_dict(
+                    checkpoint["discriminator_state_dict"]
+                )
+                self.disc_optimizer.load_state_dict(
+                    checkpoint["disc_optimizer_state_dict"]
+                )
+            else:
+                logger.warning(
+                    "Checkpoint has no discriminator state; the critic restarts "
+                    "from random init while the decoder does not. Expect a "
+                    "transient loss spike once disc_start_step is passed."
+                )
+
         logger.info(f"Resumed from step {self.global_step}")
 
 
@@ -571,6 +808,18 @@ def main():
         type=str,
         default=None,
         help="Path to Stage-1 VAE checkpoint (DiT stage)",
+    )
+    parser.add_argument(
+        "--no-adversarial",
+        action="store_true",
+        help="Stage-1 only: disable the discriminator and train the VAE with the "
+             "reconstruction objective alone (ablation / debugging)",
+    )
+    parser.add_argument(
+        "--disc-start-step",
+        type=int,
+        default=None,
+        help="Stage-1 only: optimizer step at which the discriminator is engaged",
     )
     parser.add_argument(
         "--clearml",
@@ -620,6 +869,10 @@ def main():
         config.max_samples = args.max_samples
     if args.vae_checkpoint is not None:
         config.vae_checkpoint = args.vae_checkpoint
+    if args.no_adversarial:
+        config.adversarial = False
+    if args.disc_start_step is not None:
+        config.disc_start_step = args.disc_start_step
     if args.clearml:
         config.use_clearml = True
     if args.clearml_project is not None:

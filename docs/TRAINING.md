@@ -41,9 +41,33 @@ Before beginning the training process, you must acquire and prepare the datasets
 
 ## Stage 1: Training the Audio VAE
 
-The first stage involves training the Audio VAE to compress raw audio waveforms into a compact latent space. This step is critical, as the quality of the VAE dictates the maximum possible audio quality of the final generation.
+The first stage involves training the Audio VAE to compress raw audio waveforms into a compact latent space. This step is critical, as the quality of the VAE dictates the maximum possible audio quality of the final generation. The DiT only ever produces latents, so anything the decoder cannot render is unrecoverable no matter how good Stage 2 becomes.
 
-The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 64-dimensional latent space. It is trained using a combination of L1 reconstruction loss, Multi-resolution STFT loss, and KL divergence loss.
+The VAE compresses 44.1 kHz stereo audio by a factor of 1024x (strides `4, 4, 8, 8`), mapping it to a 64-dimensional latent space.
+
+### The Stage-1 objective
+
+The VAE is trained with a five-term objective:
+
+| Term | Config key | Default | What it is for |
+|------|-----------|---------|----------------|
+| Waveform L1 | `vae_l1_weight` | 0.1 | Absolute amplitude and DC correctness |
+| Multi-resolution STFT | `vae_spectral_weight` | 1.0 | Linear-frequency spectral magnitude fidelity |
+| Multi-scale log-mel | `vae_mel_weight` | 15.0 | Perceptual weighting: log-frequency band pooling with a bounded log floor |
+| KL divergence | `vae_kl_weight` | 1e-4 | Keeps the latent close to a unit Gaussian so the DiT has a well-conditioned target |
+| Hinge adversarial + feature matching | `vae_adv_weight`, `vae_fm_weight` | 1.0, 2.0 | Removes the conditional-mean blur that no regression loss can avoid |
+
+The adversarial terms matter more than their weights suggest. A purely reconstructive objective is a conditional-mean estimator: many waveforms share a magnitude spectrum, and an L-p distance between them is minimised by their *average*. Averaging over phase is what smears transients, hollows the stereo image, and gives regression-trained audio autoencoders their characteristic "under water" quality. Every production neural codec (SoundStream, EnCodec, DAC, the Stable Audio autoencoder) is trained adversarially for exactly this reason.
+
+The critic is a multi-period discriminator (HiFi-GAN) plus a multi-resolution complex-STFT discriminator with per-frequency-band sub-critics (EnCodec/DAC). See `synthgen/training/discriminator.py`.
+
+Adversarial training is on by default. It is engaged only after `disc_start_step` optimizer steps, so the decoder gets a purely reconstructive warm-up first - an adversarial gradient against a decoder that still outputs noise is destructive rather than informative. To ablate it:
+
+```bash
+uv run synthgen-train --config configs/vae_audiocaps.yaml --no-adversarial
+```
+
+`experiments/vae_objective_ab.py` runs the two objectives head to head on the same data, seed and step count and writes the reconstructions out as audio.
 
 ### Configuration
 
@@ -68,7 +92,16 @@ uv run torchrun --nproc_per_node=4 -m synthgen.training.trainer \
 
 ### Evaluation
 
-Monitor training metrics in ClearML (see [CLEARML.md](CLEARML.md)). The key metric to watch is `spectral_loss`. Once the loss plateaus (typically around 300k-500k steps), the VAE is ready. You can test the reconstruction quality by encoding and decoding test audio files.
+Monitor training metrics in ClearML (see [CLEARML.md](CLEARML.md)). Watch `mel_loss` as the headline reconstruction number - it tracks perceived quality more closely than `spectral_loss`, which is dominated by bins far below the threshold of hearing. Once it plateaus (typically around 300k-500k steps), the VAE is ready. Test reconstruction quality by encoding and decoding held-out audio and listening to it; no scalar substitutes for that.
+
+Once the critic is engaged, `disc_loss` should settle near 1.0-1.5 and stay there. Two failure modes to watch for:
+
+- `disc_loss` collapsing towards 0 means the critic has won outright and the generator gradient has gone flat. Lower `disc_learning_rate` or raise `disc_start_step`.
+- `adv_loss` diverging while `mel_loss` climbs means the adversarial term is overpowering reconstruction. Lower `vae_adv_weight`; `vae_fm_weight` can usually be raised in its place, since feature matching supplies the same perceptual signal with a far better conditioned gradient.
+
+### A step is an optimizer step
+
+`max_steps`, `warmup_steps`, `save_every_steps` and `disc_start_step` all count **optimizer** steps. One optimizer step consumes `gradient_accumulation_steps` micro-batches, so the config above sees `10000 x 8 = 80000` clips. (Before this was aligned, `global_step` counted micro-batches while the LR scheduler was stepped once per optimizer step, so a cosine schedule configured for `max_steps` only traversed `1/gradient_accumulation_steps` of its curve and the learning rate never annealed. If you are resuming a run started before that change, its step counter means something different.)
 
 ## Stage 2: Training the Diffusion Transformer (DiT)
 
