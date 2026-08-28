@@ -147,19 +147,29 @@ production audio autoencoder (EnCodec, DAC, Stable Audio) has one.
 
 ### Reduced-scale training ablation
 
-`... train` trains the same ~1M-parameter AudioVAE twice — identical
-architecture, seed, data, step count and optimiser — changing only the
-objective, then reports third-party metrics (SI-SDR, band-limited log-spectral
-distance, envelope error, stereo width) that neither arm optimises directly.
+`... train` trains the same small AudioVAE twice — identical architecture,
+seed, data, step count and optimiser — changing only the objective, then
+reports third-party metrics (SI-SDR, band-limited log-spectral distance,
+envelope error, stereo width) that neither arm optimises directly.
+
+The run used for the numbers below:
+
+```bash
+python -m experiments.vae_objective_ablation train --out runs/train \
+  --sources 3 --seconds 1.0 --crops-per-source 1 --batch-size 3 \
+  --steps 2000 --lr 2e-3 --strides 2,2,4,4
+```
 
 Read it for what it is: **an objective ablation at reduced scale, in the
 overfit regime** (reconstruction is measured on the clips it trained on,
 because the question is what the objective preserves, not how the model
-generalises). It is not a quality claim about the production model. Two further
-caveats: the new objective has more terms and therefore a larger raw gradient
-at equal reconstruction quality — gradient clipping at norm 1.0 equalises much
-but not all of this — and the adversarial terms are **not** exercised at this
-scale, since a GAN needs far more than 900 CPU steps to say anything.
+generalises). The bottleneck is 64x, not the production VAE's 1024x, because
+that is what converges on a CPU in minutes. It is not a quality claim about the
+production model. Two further caveats: the new objective has more terms and
+therefore a larger raw gradient at equal reconstruction quality — gradient
+clipping at norm 1.0 equalises much but not all of this, and the learning-rate
+control below is what tests it — and the adversarial terms are **not**
+exercised at this scale, since a GAN needs far more steps to say anything.
 
 ## Practical notes
 

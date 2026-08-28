@@ -273,15 +273,15 @@ def run_mean_seeking(out_dir: Path, path: str, offset: float, seconds: float) ->
 # =============================================================================
 
 
-def build_vae(seed: int) -> AudioVAE:
+def build_vae(seed: int, strides: tuple, base_channels: int, latent_dim: int) -> AudioVAE:
     torch.manual_seed(seed)
     return AudioVAE(
         in_channels=2,
-        latent_dim=32,
-        base_channels=16,
+        latent_dim=latent_dim,
+        base_channels=base_channels,
         encoder_channel_multipliers=(1, 2, 4, 8),
         decoder_channel_multipliers=(8, 4, 2, 1),
-        strides=(4, 4, 4, 8),
+        strides=strides,
         num_residual_per_block=2,
     )
 
@@ -304,13 +304,18 @@ def train_arm(
     batch_size: int,
     lr: float,
     seed: int,
+    strides: tuple = (4, 4, 4, 4),
+    base_channels: int = 16,
+    latent_dim: int = 32,
+    log_every: int = 100,
 ) -> tuple[AudioVAE, list]:
-    vae = build_vae(seed)
+    vae = build_vae(seed, strides, base_channels, latent_dim)
     optimizer = torch.optim.AdamW(vae.parameters(), lr=lr, betas=(0.9, 0.95))
 
     generator = torch.Generator().manual_seed(seed)
     history = []
     started = time.time()
+    probe = dataset[0].unsqueeze(0)
 
     for step in range(steps):
         # Cosine decay to a tenth of the peak rate.
@@ -331,13 +336,23 @@ def train_arm(
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
 
-        if step % 25 == 0 or step == steps - 1:
-            history.append({"step": step, "loss": float(losses["loss"])})
+        if step % log_every == 0 or step == steps - 1:
+            # Track a measure that is not either objective, so the two arms can
+            # be compared while they run rather than only at the end.
+            with torch.no_grad():
+                vae.eval()
+                sdr = si_sdr_db(reconstruct(vae, to_numpy(probe)), to_numpy(probe))
+                vae.train()
+            loss_value = float(losses["loss"].detach())
+            history.append({"step": step, "loss": loss_value, "si_sdr_db": sdr})
             print(
-                f"  [{name}] step {step:4d}/{steps}  loss={float(losses['loss']):.4f}"
-                f"  ({time.time() - started:.0f}s)",
+                f"  [{name}] step {step:4d}/{steps}  loss={loss_value:9.4f}"
+                f"  si-sdr={sdr:7.2f} dB  ({time.time() - started:.0f}s)",
                 flush=True,
             )
+            if not np.isfinite(loss_value):
+                print(f"  [{name}] objective diverged to NaN at step {step}", flush=True)
+                break
 
     return vae, history
 
@@ -373,9 +388,21 @@ def run_training(
     lr: float,
     seed: int,
     crops_per_source: int,
+    strides: tuple = (4, 4, 4, 4),
+    base_channels: int = 16,
+    latent_dim: int = 32,
+    log_every: int = 100,
+    lr_overrides: dict | None = None,
 ) -> dict:
     dataset = build_dataset(sources, seconds, crops_per_source)
-    print(f"Dataset: {tuple(dataset.shape)} ({dataset.shape[0]} clips)", flush=True)
+    compression = 1
+    for stride in strides:
+        compression *= stride
+    print(
+        f"Dataset: {tuple(dataset.shape)} ({dataset.shape[0]} clips) · "
+        f"{compression}x compression",
+        flush=True,
+    )
 
     arms = {
         "legacy": LegacyVAELoss(),
@@ -387,10 +414,18 @@ def run_training(
 
     models = {}
     histories = {}
+    rates = {}
     for name, objective in arms.items():
-        print(f"Training arm: {name}", flush=True)
+        # Each arm may be given its own learning rate. The two objectives have
+        # different gradient scales, so one shared rate can compare step sizes
+        # rather than objectives; see experiments/lr_control.py.
+        arm_lr = lr_overrides.get(name, lr) if lr_overrides else lr
+        rates[name] = arm_lr
+        print(f"Training arm: {name} (lr={arm_lr:g})", flush=True)
         models[name], histories[name] = train_arm(
-            name, objective, dataset, steps, batch_size, lr, seed
+            name, objective, dataset, steps, batch_size, arm_lr, seed,
+            strides=strides, base_channels=base_channels, latent_dim=latent_dim,
+            log_every=log_every,
         )
 
     results: dict[str, dict] = {}
@@ -423,7 +458,12 @@ def run_training(
             key: float(np.nanmean(values)) for key, values in scores.items()
         }
 
-    return {"per_source": results, "aggregate": aggregate, "history": histories}
+    return {
+        "per_source": results,
+        "aggregate": aggregate,
+        "history": histories,
+        "learning_rates": rates,
+    }
 
 
 # =============================================================================
@@ -442,7 +482,36 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--crops-per-source", type=int, default=4)
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument(
+        "--strides",
+        type=str,
+        default="4,4,4,4",
+        help="Encoder strides; their product is the compression ratio",
+    )
+    parser.add_argument("--base-channels", type=int, default=16)
+    parser.add_argument("--latent-dim", type=int, default=32)
+    parser.add_argument("--log-every", type=int, default=100)
+    parser.add_argument(
+        "--lr-legacy",
+        type=float,
+        default=None,
+        help="Learning rate for the legacy arm (defaults to --lr)",
+    )
+    parser.add_argument(
+        "--lr-improved",
+        type=float,
+        default=None,
+        help="Learning rate for the new-objective arm (defaults to --lr)",
+    )
+    parser.add_argument(
+        "--sources",
+        type=int,
+        default=None,
+        help="Use only the first N sources (smaller, faster ablations)",
+    )
     args = parser.parse_args()
+    strides = tuple(int(s) for s in args.strides.split(","))
+    sources = DEFAULT_SOURCES[: args.sources] if args.sources else DEFAULT_SOURCES
 
     torch.set_num_threads(args.threads)
     out_dir = Path(args.out)
@@ -452,9 +521,9 @@ def main() -> None:
         payload = {
             "config": vars(args),
             "sources": [
-                {"label": s[0], "path": s[1], "offset": s[2]} for s in DEFAULT_SOURCES
+                {"label": s[0], "path": s[1], "offset": s[2]} for s in sources
             ],
-            "results": run_probe(out_dir, DEFAULT_SOURCES, args.seconds),
+            "results": run_probe(out_dir, sources, args.seconds),
             "mean_seeking": run_mean_seeking(
                 out_dir,
                 "/home/user/aisynth-vst/assets/whitenoise.wav",
@@ -466,17 +535,27 @@ def main() -> None:
         payload = {
             "config": vars(args),
             "sources": [
-                {"label": s[0], "path": s[1], "offset": s[2]} for s in DEFAULT_SOURCES
+                {"label": s[0], "path": s[1], "offset": s[2]} for s in sources
             ],
             **run_training(
                 out_dir,
-                DEFAULT_SOURCES,
+                sources,
                 args.seconds,
                 args.steps,
                 args.batch_size,
                 args.lr,
                 args.seed,
                 args.crops_per_source,
+                strides=strides,
+                base_channels=args.base_channels,
+                latent_dim=args.latent_dim,
+                log_every=args.log_every,
+                lr_overrides={
+                    name: rate
+                    for name, rate in (("legacy", args.lr_legacy),
+                                       ("improved", args.lr_improved))
+                    if rate is not None
+                },
             ),
         }
 
