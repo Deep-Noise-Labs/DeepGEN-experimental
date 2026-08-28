@@ -26,6 +26,8 @@ The architecture draws from state-of-the-art research in text-to-audio generatio
 
 **Why T5-base?** T5-base provides a strong text understanding backbone that has been validated across multiple audio generation systems (Stable Audio, AudioLDM). It balances quality with computational efficiency.
 
+**Why the VAE objective looks the way it does.** The decoder is a hard ceiling on final audio quality — the DiT can never render detail the decoder cannot produce — so Stage 1 is trained against a perceptually weighted reconstruction stack (multi-resolution STFT from 8192 down to 256, multi-scale log-mel, mid/side coherence) plus a complex-STFT critic. A purely reconstructive objective is minimised by the *average* of all plausible outputs, and the average of many plausible textures is a dull one; the critic is what supplies "is this a plausible sound" rather than "is this close to the mean". Rationale, measurements and a reproducible ablation: [docs/VAE_OBJECTIVE.md](docs/VAE_OBJECTIVE.md).
+
 ## Key Features
 
 - Text-conditioned generation of short audio samples (3–15 seconds)
@@ -42,6 +44,7 @@ synthgen-experimental/
 ├── synthgen/
 │   ├── model/           # Neural network architecture
 │   │   ├── vae.py       # Audio VAE (encoder + decoder)
+│   │   ├── discriminator.py  # Complex-STFT critic (VAE training only)
 │   │   ├── dit.py       # Diffusion Transformer
 │   │   ├── text_encoder.py  # T5-based text conditioning
 │   │   └── synthgen.py  # Full model assembly
@@ -58,9 +61,12 @@ synthgen-experimental/
 │   ├── tracking/        # ClearML (primary) / WandB experiment tracking
 │   └── utils/           # Shared utilities
 │       └── audio.py     # Audio I/O utilities
+├── experiments/         # Reproducible ablations (not part of the package)
+│   └── vae_objective_ablation.py
 ├── tests/               # Unit and integration tests
 ├── docs/                # Documentation
 │   ├── TRAINING.md      # Training guidelines
+│   ├── VAE_OBJECTIVE.md # Stage-1 objective: rationale and evidence
 │   ├── CLEARML.md       # ClearML setup and upload policy
 │   └── TRITON_INFERENCE.md  # Triton deployment guide
 ├── configs/             # Configuration files

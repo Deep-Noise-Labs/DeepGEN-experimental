@@ -16,6 +16,22 @@ warmup_steps: 500
 min_lr: 1.0e-6
 mixed_precision: "bf16"
 
+# Stage-1 objective (see docs/VAE_OBJECTIVE.md)
+vae_l1_weight: 0.1
+vae_spectral_weight: 1.0
+vae_mel_weight: 1.0
+vae_stereo_weight: 0.25
+vae_kl_weight: 1.0e-4
+
+# Critic switches on at 40% of this (short) validation budget. On a full run
+# leave it at the default 20000 steps.
+vae_adversarial: true
+adv_start_step: 4000
+adv_weight: 0.1
+feature_matching_weight: 2.0
+disc_learning_rate: 1.0e-4
+disc_n_ffts: [2048, 1024, 512, 256, 128]
+
 checkpoint_dir: "./checkpoints/vae_audiocaps"
 save_every_steps: 1000
 resume_from: null
