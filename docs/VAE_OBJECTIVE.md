@@ -165,11 +165,33 @@ overfit regime** (reconstruction is measured on the clips it trained on,
 because the question is what the objective preserves, not how the model
 generalises). The bottleneck is 64x, not the production VAE's 1024x, because
 that is what converges on a CPU in minutes. It is not a quality claim about the
-production model. Two further caveats: the new objective has more terms and
-therefore a larger raw gradient at equal reconstruction quality — gradient
-clipping at norm 1.0 equalises much but not all of this, and the learning-rate
-control below is what tests it — and the adversarial terms are **not**
-exercised at this scale, since a GAN needs far more steps to say anything.
+production model, and the adversarial terms are **not** exercised at this
+scale, since a GAN needs far more steps to say anything.
+
+### The learning-rate control
+
+The obvious objection: the new objective has more terms and so a larger raw
+gradient at equal reconstruction quality, so running both arms at one shared
+learning rate might compare step sizes rather than objectives. Clipping at norm
+1.0 absorbs much of that, but not all of it. `experiments/lr_control.py` sweeps
+both objectives instead of arguing about it — 400 steps per point, SI-SDR after:
+
+| Learning rate | Current objective | New objective |
+|---|---|---|
+| 5e-4 | -27.0 dB | -9.5 dB |
+| 1e-3 | -19.5 dB | -2.5 dB |
+| **2e-3** | **-16.0 dB** | **+3.5 dB** |
+| 4e-3 | diverged | diverged |
+
+The new objective is ahead at every rate, and at its *worst* rate (-9.5 dB) it
+is still 6.5 dB ahead of the old objective's *best* (-16.0 dB). Both peak at
+2e-3, so the head-to-head runs there and the step-size confound is controlled
+rather than assumed away.
+
+Note what this does **not** show: both objectives diverge to NaN at 4e-3. The
+floors added to the new objective bound the silent-input case measured above;
+they do not make it stable at an arbitrary learning rate, and nothing here says
+they do.
 
 ## Practical notes
 

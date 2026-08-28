@@ -103,7 +103,11 @@ class STFTDiscriminator(nn.Module):
 
     def _stft(self, x: torch.Tensor) -> torch.Tensor:
         """Return the complex STFT as a real 2-channel image."""
-        # x: (batch * channels, samples)
+        # x: (batch * channels, samples).
+        # torch.stft has no reduced-precision kernel, and the trainer calls the
+        # critic from inside an autocast block, so the input arrives as bf16.
+        # Analyse in fp32 and let autocast re-cast for the convolutions.
+        x = x.float()
         spec = torch.stft(
             x,
             n_fft=self.n_fft,

@@ -45,6 +45,18 @@ class TestSTFTDiscriminator:
         assert torch.isfinite(audio.grad).all()
         assert audio.grad.abs().sum() > 0
 
+    def test_accepts_reduced_precision_input(self):
+        """
+        The trainer calls the critic from inside an autocast block, so the
+        reconstruction arrives as bf16. torch.stft has no bf16 kernel, so the
+        critic has to widen before analysing rather than raising.
+        """
+        disc = STFTDiscriminator(
+            n_fft=256, hop_length=64, win_length=256, channels=8, num_layers=2
+        )
+        logits, _ = disc(torch.randn(1, 2, 8192, dtype=torch.bfloat16))
+        assert torch.isfinite(logits).all()
+
     def test_mono_input(self):
         disc = STFTDiscriminator(
             n_fft=256, hop_length=64, win_length=256, channels=8, num_layers=2
