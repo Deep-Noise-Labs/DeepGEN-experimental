@@ -22,7 +22,7 @@ what the objective preserves, not how the model generalises.
 
 Usage:
     python -m experiments.vae_objective_ablation probe --out runs/probe
-    python -m experiments.vae_objective_ablation train --out runs/train --steps 900
+    python -m experiments.vae_objective_ablation train --out runs/train --steps 1500
 """
 
 import argparse

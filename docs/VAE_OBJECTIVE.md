@@ -18,11 +18,17 @@ This document records what was wrong with it, what replaced it, and — because
 several of the obvious-sounding arguments turned out not to survive
 measurement — what the evidence actually shows.
 
+A listening report with before/after audio for all of this:
+<https://claude.ai/code/artifact/64b97354-3890-4c65-bc17-3b1e464d4a99>
+
 Everything below is reproducible:
 
 ```bash
 python -m experiments.vae_objective_ablation probe --out runs/probe
-python -m experiments.vae_objective_ablation train --out runs/train --steps 900
+python -m experiments.vae_objective_ablation train --out runs/train \
+  --sources 3 --seconds 1.0 --crops-per-source 1 --batch-size 3 \
+  --steps 1500 --lr 2e-3 --strides 2,2,4,4
+python -m experiments.lr_control --out runs/lr_control --steps 400
 ```
 
 ## What was wrong
@@ -157,8 +163,26 @@ The run used for the numbers below:
 ```bash
 python -m experiments.vae_objective_ablation train --out runs/train \
   --sources 3 --seconds 1.0 --crops-per-source 1 --batch-size 3 \
-  --steps 2000 --lr 2e-3 --strides 2,2,4,4
+  --steps 1500 --lr 2e-3 --strides 2,2,4,4
 ```
+
+Averaged over the training clips at the final weights:
+
+| Measure | Current objective | New objective | |
+|---|---|---|---|
+| SI-SDR (dB) | -2.20 | **+2.74** | better |
+| Log-spectral distance, 20-200 Hz (dB) | 8.33 | **7.42** | better |
+| Log-spectral distance, 200 Hz-4 kHz (dB) | 8.41 | **6.16** | better |
+| Log-spectral distance, above 4 kHz (dB) | 2.28 | **1.88** | better |
+| Envelope error, transients (dB) | **1.79** | 1.92 | worse |
+| Sub-band energy error, 20-200 Hz (dB) | +0.13 | **+0.09** | better |
+| Stereo width (source: 0.73) | 0.04 | **0.18** | closer |
+
+The stereo row is the clearest single effect: the old objective collapses the
+image to 0.04 — effectively mono — on every clip, which is exactly what an
+objective that never constrains the L/R relationship should be expected to do.
+The envelope (transient) measure goes the other way by a small margin; it is
+the one place the reweighting costs something at this scale.
 
 Read it for what it is: **an objective ablation at reduced scale, in the
 overfit regime** (reconstruction is measured on the clips it trained on,
@@ -188,10 +212,15 @@ is still 6.5 dB ahead of the old objective's *best* (-16.0 dB). Both peak at
 2e-3, so the head-to-head runs there and the step-size confound is controlled
 rather than assumed away.
 
-Note what this does **not** show: both objectives diverge to NaN at 4e-3. The
-floors added to the new objective bound the silent-input case measured above;
-they do not make it stable at an arbitrary learning rate, and nothing here says
-they do.
+Two things this does **not** show:
+
+- Each point is only 400 steps, so it measures how fast each objective gets
+  somewhere, not where each ends up. Given 1500 steps the old objective
+  recovers to around -0.4 dB on the same task. Convergence speed and final
+  quality are different claims; do not read this table as the second one.
+- Both objectives diverge to NaN at 4e-3. The floors added to the new objective
+  bound the silent-input case measured above; they do not make it stable at an
+  arbitrary learning rate, and nothing here says they do.
 
 ## Practical notes
 
