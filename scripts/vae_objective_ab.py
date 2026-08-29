@@ -97,6 +97,34 @@ def stereo_width(x):
     return float(np.sqrt(np.mean(side ** 2)) / (np.sqrt(np.mean(mid ** 2)) + 1e-12))
 
 
+def correlation(a, b):
+    """Normalised waveform correlation in [-1, 1]."""
+    a, b = a - a.mean(), b - b.mean()
+    denom = np.sqrt(np.sum(a ** 2) * np.sum(b ** 2))
+    return float(np.sum(a * b) / denom) if denom > 1e-12 else 0.0
+
+
+def channel_correlations(pred, ref):
+    """
+    Mid- and side-channel waveform correlation against the reference.
+
+    This is the metric to read first, for two reasons. It is close to
+    objective-neutral - both objectives are spectral, and neither optimises
+    time-domain correlation directly - and it is the only thing here that
+    distinguishes a faithful reconstruction from one that merely has the right
+    energy in the right bands. In particular, a stereo-width figure alone can be
+    satisfied by decorrelated noise in the side channel; width plus side
+    correlation cannot.
+
+    Correlation near zero means the model did not reconstruct the clip at all,
+    and every other metric for that clip is measuring noise.
+    """
+    n = min(pred.shape[-1], ref.shape[-1])
+    p_mid, p_side = (pred[0, :n] + pred[1, :n]) / 2, (pred[0, :n] - pred[1, :n]) / 2
+    r_mid, r_side = (ref[0, :n] + ref[1, :n]) / 2, (ref[0, :n] - ref[1, :n]) / 2
+    return correlation(p_mid, r_mid), correlation(p_side, r_side)
+
+
 def crest_db(x):
     return float(20 * np.log10(np.max(np.abs(x)) / (np.sqrt(np.mean(x ** 2)) + 1e-12)))
 
@@ -186,8 +214,11 @@ def main():
         rows = []
         for path, ref, rec in zip(paths, raw, reconstruct(model, data)):
             save(out_dir / f"{path.stem}__{tag}.wav", rec, args.sample_rate)
+            mid_corr, side_corr = channel_correlations(rec, ref)
             rows.append({
                 "clip": path.stem,
+                "mid_corr": mid_corr,
+                "side_corr": side_corr,
                 "lsd_db": log_spectral_distance(rec, ref),
                 "band_8k_16k_db": band_error_db(rec, ref, 8000, 16000, args.sample_rate),
                 "band_2k_8k_db": band_error_db(rec, ref, 2000, 8000, args.sample_rate),
@@ -199,22 +230,51 @@ def main():
         report["runs"][tag] = {"history": history, "per_clip": rows}
 
     print("\n==================== RESULTS ====================")
-    print(f"{'clip':<16}{'LSD dB (lower better)':>24}{'8-16 kHz err dB':>21}{'width':>18}")
+    print("Read mid-channel correlation first. Near zero means the model did not")
+    print("reconstruct that clip at all, and its other numbers are measuring noise.\n")
+    print(f"{'clip':<16}{'mid corr':>20}{'side corr':>20}"
+          f"{'LSD dB':>18}{'width':>18}")
     for i, path in enumerate(paths):
         b = report["runs"]["before"]["per_clip"][i]
         a = report["runs"]["after"]["per_clip"][i]
-        print(f"{path.stem:<16}{b['lsd_db']:>11.2f} ->{a['lsd_db']:>10.2f}"
-              f"{b['band_8k_16k_db']:>11.1f} ->{a['band_8k_16k_db']:>8.1f}"
-              f"{b['width']:>9.3f} ->{a['width']:>6.3f}  (ref {b['width_ref']:.3f})")
+        flag = "" if max(b["mid_corr"], a["mid_corr"]) > 0.3 else "  <- did not converge"
+        print(f"{path.stem:<16}{b['mid_corr']:>9.3f} ->{a['mid_corr']:>8.3f}"
+              f"{b['side_corr']:>10.3f} ->{a['side_corr']:>8.3f}"
+              f"{b['lsd_db']:>9.2f} ->{a['lsd_db']:>6.2f}"
+              f"{b['width']:>9.3f} ->{a['width']:>6.3f}{flag}")
+        print(f"{'':<16}{'':>20}{'':>20}{'':>18}  (ref width {b['width_ref']:.3f})")
+
+    converged = [
+        i for i in range(len(paths))
+        if max(report["runs"]["before"]["per_clip"][i]["mid_corr"],
+               report["runs"]["after"]["per_clip"][i]["mid_corr"]) > 0.3
+    ]
 
     report["summary"] = {}
-    for key, label in [("lsd_db", "log-spectral distance (dB)"),
-                       ("band_8k_16k_db", "8-16 kHz energy error (dB)"),
-                       ("band_2k_8k_db", "2-8 kHz energy error (dB)")]:
-        before = float(np.mean([c[key] for c in report["runs"]["before"]["per_clip"]]))
-        after = float(np.mean([c[key] for c in report["runs"]["after"]["per_clip"]]))
-        report["summary"][key] = {"before": before, "after": after}
-        print(f"\nmean {label:<32} before={before:8.2f}   after={after:8.2f}")
+    report["converged_clips"] = [paths[i].stem for i in converged]
+    for key, label, bias in [
+        ("mid_corr", "mid-channel correlation", "higher better, near-neutral"),
+        ("side_corr", "side-channel correlation", "higher better, near-neutral"),
+        ("lsd_db", "log-spectral distance (dB)", "lower better, FAVOURS legacy"),
+        ("band_8k_16k_db", "8-16 kHz energy error (dB)", "nearer zero better"),
+        ("band_2k_8k_db", "2-8 kHz energy error (dB)", "nearer zero better"),
+    ]:
+        b_all = float(np.mean([c[key] for c in report["runs"]["before"]["per_clip"]]))
+        a_all = float(np.mean([c[key] for c in report["runs"]["after"]["per_clip"]]))
+        b_cv = float(np.mean([report["runs"]["before"]["per_clip"][i][key] for i in converged])) if converged else float("nan")
+        a_cv = float(np.mean([report["runs"]["after"]["per_clip"][i][key] for i in converged])) if converged else float("nan")
+        report["summary"][key] = {
+            "before": b_all, "after": a_all,
+            "before_converged": b_cv, "after_converged": a_cv, "bias": bias,
+        }
+        print(f"\n{label}  ({bias})")
+        print(f"   all clips        before={b_all:8.3f}   after={a_all:8.3f}")
+        print(f"   converged only   before={b_cv:8.3f}   after={a_cv:8.3f}"
+              f"   (n={len(converged)})")
+
+    print("\nNOTE on log-spectral distance: it is a linear-magnitude distance, which is")
+    print("essentially what the legacy objective optimises. The baseline is expected to")
+    print("win on it; it is not a neutral adjudicator between the two objectives.")
 
     with open(out_dir / "ab_report.json", "w") as fh:
         json.dump(report, fh, indent=2)
