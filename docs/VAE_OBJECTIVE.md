@@ -138,12 +138,65 @@ its frequency. Pre-existing checkpoints are upgraded transparently on load.
 
 ## Does it actually sound different?
 
-A controlled A/B was run on CPU: same model, same real 44.1 kHz stereo clips,
-same seed, same optimiser, same 3000 steps - only the loss differs. This is a
-reconstruction-ceiling test, so the model is small and the clips are short; the
-result to read is the *difference between objectives*, not absolute fidelity.
-Numbers and audio: see the report linked from the PR, reproduce with
+A controlled A/B was run on CPU: same ~1M-parameter model, same real 44.1 kHz
+stereo clips, same seed, same optimiser, same 4000 steps, each objective
+rescaled to 1.0 at initialisation so the shared learning rate and gradient clip
+mean the same thing for both. Only the loss differs. Reproduce with
 `scripts/vae_objective_ab.py`.
+
+This is a reconstruction-*ceiling* test at CPU scale: both runs sound rough, and
+the result to read is the difference in character, not absolute fidelity.
+
+Means over the four clips that converged (guitar pluck, guitar in a stereo room,
+a stereo pair of measured reverb impulses, a spring impulse):
+
+| Metric | Before | After | Note |
+|---|---|---|---|
+| Mid-channel correlation | **0.74** | 0.64 | near-neutral metric |
+| Side-channel correlation | **0.50** | 0.29 | near-neutral metric |
+| Log-spectral distance | **4.25 dB** | 6.04 dB | favours legacy by construction |
+| 2-8 kHz energy error | -10.18 dB | **-4.92 dB** | nearer zero better |
+| 8-16 kHz energy error | 2.88 dB | **2.37 dB** | nearer zero better |
+
+The clearest single result is the stereo reverb pair, reference width 1.00:
+
+| | Side correlation | Width | 2-8 kHz |
+|---|---|---|---|
+| Before | 0.93 | **0.26** | **-17.1 dB** |
+| After | 0.90 | **1.04** | **-2.0 dB** |
+
+The legacy objective reproduces the side channel's *shape* accurately - 0.93
+correlation - but at **a quarter of its level**, and drops 17 dB of midrange. The
+new objective holds essentially the same side correlation at the correct level.
+That is the mid/side change doing exactly what it was added for, and it is
+audible as image width.
+
+**Read the whole table, though.** Averaged over the converged clips the legacy
+objective reconstructs the waveform *more* accurately (mid correlation 0.74
+against 0.64). The new objective buys spectral balance and stereo image with
+some waveform precision. At CPU scale that trade is the honest summary, and
+whether it holds at real scale is not established here.
+
+Two caveats on the metrics themselves. Log-spectral distance is a
+linear-magnitude distance, i.e. close to what the legacy objective optimises, so
+the baseline is expected to win on it and it is not a neutral adjudicator.
+Correlation is the closest thing to neutral available here, since both
+objectives are spectral and neither optimises time-domain correlation directly.
+
+Two earlier versions of this A/B produced wrong answers, both caught by
+inspection rather than by the harness, and both now guarded in the script:
+
+1. A large apparent stereo win that was actually **non-convergence**. On dense
+   polyphonic material neither model reconstructed the clip at all (correlation
+   ~0.03 for both), yet the new objective's output still scored a plausible
+   stereo width - decorrelated content with roughly the right energy ratio.
+   Width alone cannot distinguish that from a faithful image; width plus side
+   correlation can. The script now reports correlation first and flags clips
+   where both runs stay under 0.3.
+2. A **handicap on the new objective**. Its loss is ~15x larger (mel_weight
+   alone is 15) and both runs clipped gradients at the same threshold, so it was
+   clipped on essentially every step and trained at a smaller effective step
+   size. Hence the loss normalisation described above.
 
 The adversarial half is deliberately **not** part of that A/B. A GAN needs far
 more than a CPU-scale budget to become useful, and switching it on there would
