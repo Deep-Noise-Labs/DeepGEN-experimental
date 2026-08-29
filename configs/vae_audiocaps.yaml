@@ -20,6 +20,29 @@ checkpoint_dir: "./checkpoints/vae_audiocaps"
 save_every_steps: 1000
 resume_from: null
 
+# VAE objective. See docs/VAE_OBJECTIVE.md for why these weights, and for the
+# measurement that motivated them.
+vae_l1_weight: 0.1
+vae_spectral_weight: 0.25      # legacy linear-magnitude MRSTFT, broadband anchor
+vae_mel_weight: 15.0           # multi-scale log-mel (mid/side), the main term
+vae_kl_weight: 1.0e-4
+vae_mid_side: true
+
+# Adversarial training. The discriminator is the only term that sees phase.
+# adv_start_step should sit after the reconstruction loss has flattened - on
+# this 10k-step validation budget that is most of the run, so adversarial
+# training only engages for the tail. Raise max_steps for a real stage-1 run.
+adv_enabled: true
+adv_start_step: 6000
+adv_weight: 1.0
+fm_weight: 2.0
+adv_mode: "hinge"
+disc_learning_rate: 1.0e-4
+
+# Set true to restore the pre-rework objective exactly (and disable the
+# discriminator). This is the A/B baseline and the rollback switch.
+legacy_vae_objective: false
+
 log_every_steps: 50
 eval_every_steps: 1000
 use_clearml: false

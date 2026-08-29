@@ -25,20 +25,54 @@ import torch.nn.functional as F
 
 class Snake(nn.Module):
     """
-    Snake activation function: x + (1/alpha) * sin^2(alpha * x).
+    Snake activation: x + (1/beta) * sin^2(alpha * x).
 
     Provides periodic inductive bias that is beneficial for audio synthesis,
     as shown in BigVGAN and Stable Audio.
+
+    ``alpha`` (frequency) and ``beta`` (magnitude) are stored in log space, as
+    in BigVGAN's SnakeBeta. The previous version kept a single raw ``alpha`` and
+    divided by ``alpha + 1e-8``: nothing constrained that parameter to stay
+    positive, so a decoder whose alpha drifted through zero would hit a
+    ~1e8 gain and take the run out with a NaN. Exponentiating keeps both
+    strictly positive by construction, and decoupling beta lets the network
+    scale the periodic term without also changing its frequency.
     """
 
-    def __init__(self, channels: int, alpha_init: float = 1.0):
+    def __init__(
+        self,
+        channels: int,
+        alpha_init: float = 1.0,
+        beta_init: Optional[float] = None,
+    ):
         super().__init__()
-        self.alpha = nn.Parameter(
-            torch.full((1, channels, 1), alpha_init)
+        beta_init = alpha_init if beta_init is None else beta_init
+        self.log_alpha = nn.Parameter(
+            torch.full((1, channels, 1), math.log(alpha_init))
+        )
+        self.log_beta = nn.Parameter(
+            torch.full((1, channels, 1), math.log(beta_init))
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + (1.0 / (self.alpha + 1e-8)) * torch.sin(self.alpha * x) ** 2
+        alpha = self.log_alpha.exp()
+        beta = self.log_beta.exp()
+        return x + (1.0 / beta) * torch.sin(alpha * x) ** 2
+
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict,
+        missing_keys, unexpected_keys, error_msgs,
+    ):
+        """Transparently upgrade pre-rework checkpoints that stored raw ``alpha``."""
+        legacy_key = prefix + "alpha"
+        if legacy_key in state_dict and (prefix + "log_alpha") not in state_dict:
+            legacy = state_dict.pop(legacy_key).clamp(min=1e-4)
+            state_dict[prefix + "log_alpha"] = legacy.log()
+            state_dict[prefix + "log_beta"] = legacy.log().clone()
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict,
+            missing_keys, unexpected_keys, error_msgs,
+        )
 
 
 # =============================================================================
