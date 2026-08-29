@@ -237,7 +237,7 @@ rollback switch if adversarial training misbehaves on a real run.
   Resuming a *pre-adversarial* checkpoint past `adv_start_step` would pit a
   trained generator against a fresh critic; the trainer warns when it detects
   this. Raise `adv_start_step` above the resumed step in that case.
-- **Cost.** The discriminator adds roughly 55M parameters and a second
+- **Cost.** The discriminator adds roughly 42M parameters (41.1M multi-period + 0.5M complex-STFT) and a second
   forward/backward over the audio per step. Expect stage-1 steps to be ~2-2.5x
   slower once adversarial training kicks in. It only affects stage 1 - the DiT
   stage and inference are untouched.
