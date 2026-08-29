@@ -52,3 +52,23 @@ num_workers: 8
 
 # Classifier-Free Guidance
 cfg_dropout_prob: 0.1
+
+# ---------------------------------------------------------------------------
+# VAE objective (stage: "vae" only). See docs/VAE_OBJECTIVE.md.
+# ---------------------------------------------------------------------------
+vae_l1_weight: 0.1
+vae_spectral_weight: 0.25      # legacy linear-magnitude MRSTFT, broadband anchor
+vae_mel_weight: 15.0           # multi-scale log-mel (mid/side), the main term
+vae_kl_weight: 1.0e-4
+vae_mid_side: true             # measure spectral error on mid/side, not L/R
+
+# Adversarial training: the only part of the objective that sees phase.
+adv_enabled: true
+adv_start_step: 20000          # reconstruction-only warmup before the GAN engages
+adv_weight: 1.0
+fm_weight: 2.0
+adv_mode: "hinge"              # "hinge" or "lsgan"
+disc_learning_rate: 1.0e-4
+
+# Restore the pre-rework objective exactly (also disables the discriminator).
+legacy_vae_objective: false
