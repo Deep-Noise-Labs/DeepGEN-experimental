@@ -98,10 +98,17 @@ def stereo_width(x):
 
 
 def correlation(a, b):
-    """Normalised waveform correlation in [-1, 1]."""
+    """
+    Absolute normalised waveform correlation, in [0, 1].
+
+    Absolute, because a globally polarity-inverted reconstruction is a good
+    reconstruction - it is inaudible on its own. An early version of this script
+    ranked by signed correlation and scored a faithful but inverted
+    reconstruction at -0.88, i.e. worse than noise.
+    """
     a, b = a - a.mean(), b - b.mean()
     denom = np.sqrt(np.sum(a ** 2) * np.sum(b ** 2))
-    return float(np.sum(a * b) / denom) if denom > 1e-12 else 0.0
+    return abs(float(np.sum(a * b) / denom)) if denom > 1e-12 else 0.0
 
 
 def channel_correlations(pred, ref):
@@ -143,18 +150,39 @@ def train(tag, loss_fn, data, args):
     )
     gen = torch.Generator().manual_seed(args.seed)
     model.train()
+
+    # Fair-comparison scaling. The two objectives differ in magnitude by ~15x
+    # (mel_weight alone is 15), so at a shared learning rate and a shared
+    # gradient-clip threshold they do not get comparable optimisation. The
+    # larger objective is clipped on essentially every step, which silently
+    # gives it a smaller effective step size and makes it look worse for a
+    # reason that has nothing to do with what it supervises.
+    #
+    # Dividing each objective by its own value at initialisation puts both at
+    # 1.0 on step 0, so the learning rate and clip threshold mean the same thing
+    # for both. The constant is fixed, so it does not change what is optimised.
+    scale = 1.0
+    if args.normalise_loss:
+        with torch.no_grad():
+            r0, t0, m0, lv0 = model(data[: args.batch])
+            scale = float(loss_fn(r0, t0, m0, lv0)["loss"])
+        scale = scale if scale > 1e-8 else 1.0
+        print(f"[{tag}] loss at init = {scale:.4f}, normalising by it", flush=True)
+
     started = time.time()
     history = []
     for step in range(args.steps):
         idx = torch.randint(0, data.shape[0], (args.batch,), generator=gen)
         recon, target, mean, log_var = model(data[idx])
         out = loss_fn(recon, target, mean, log_var)
+        loss = out["loss"] / scale
         opt.zero_grad()
-        out["loss"].backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        loss.backward()
+        if args.grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
         opt.step()
         if (step + 1) % args.log_every == 0:
-            loss_value = float(out["loss"].detach())
+            loss_value = float(loss.detach())
             history.append({"step": step + 1, "loss": loss_value})
             elapsed = time.time() - started
             print(f"[{tag}] {step+1}/{args.steps} loss={loss_value:.4f} "
@@ -186,6 +214,15 @@ def main():
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--log-every", type=int, default=250)
+    parser.add_argument("--grad-clip", type=float, default=1.0,
+                        help="Gradient-norm clip; 0 disables")
+    parser.add_argument("--no-normalise-loss", dest="normalise_loss",
+                        action="store_false",
+                        help="Do not rescale each objective to 1.0 at init. "
+                             "Off by default because the two objectives differ "
+                             "in magnitude by ~15x, which otherwise confounds "
+                             "the shared learning rate and clip threshold.")
+    parser.set_defaults(normalise_loss=True)
     args = parser.parse_args()
 
     out_dir = Path(args.output_dir)
