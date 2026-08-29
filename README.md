@@ -26,7 +26,7 @@ The architecture draws from state-of-the-art research in text-to-audio generatio
 
 **Why T5-base?** T5-base provides a strong text understanding backbone that has been validated across multiple audio generation systems (Stable Audio, AudioLDM). It balances quality with computational efficiency.
 
-**Why the VAE objective matters most.** The decoder is a hard ceiling on the whole system: whatever it cannot reproduce, the model cannot generate, however good the DiT gets. The VAE is trained against a multi-scale log-mel loss computed on mid/side, plus adversarial and feature-matching terms against multi-period and complex-STFT discriminators. A magnitude-only objective is phase-blind — it rates a 41 ms transient smear as roughly a quarter as costly as a mild 9 kHz roll-off — and smeared transients are most of what separates model output from a Spitfire or Splice sample. See [docs/VAE_OBJECTIVE.md](docs/VAE_OBJECTIVE.md) for the measurement and the A/B.
+**Why the VAE objective matters most.** The decoder is a hard ceiling on the whole system: whatever it cannot reproduce, the model cannot generate, however good the DiT gets. The VAE is trained against a multi-scale log-mel loss computed on mid/side, plus adversarial and feature-matching terms against multi-period and complex-STFT discriminators. A magnitude-only objective is phase-blind - it rates a 41 ms transient smear as roughly a fifth as costly as a mild 9 kHz roll-off - and smeared transients are most of what separates model output from a Spitfire or Splice sample. See [docs/VAE_OBJECTIVE.md](docs/VAE_OBJECTIVE.md) for the measurement and the A/B.
 
 ## Key Features
 
