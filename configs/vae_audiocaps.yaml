@@ -2,6 +2,12 @@
 stage: "vae"
 
 vae_latent_dim: 64
+# Alias-free (2x-oversampled) Snake activations in the VAE
+vae_antialias: true
+# Reconstruction objective: constrain STFT phase and the mid/side image,
+# not just per-channel magnitude. 0.0 restores magnitude-only behaviour.
+vae_phase_weight: 1.0
+vae_stereo_weight: 1.0
 sample_rate: 44100
 audio_channels: 2
 max_duration: 15.0

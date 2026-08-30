@@ -23,8 +23,27 @@ class MultiResolutionSTFTLoss(nn.Module):
     """
     Multi-resolution STFT loss for audio reconstruction quality.
 
-    Computes spectral convergence and log-magnitude loss at multiple
-    FFT sizes to capture both fine and coarse frequency details.
+    Computes spectral convergence and log-magnitude terms at multiple FFT
+    sizes, plus two terms that a magnitude-only objective cannot express:
+
+    **Phase (complex) term.** Spectral convergence and log-magnitude both
+    depend on ``|STFT(x)|`` alone, so they are exactly invariant to phase.
+    Any two signals sharing a magnitude spectrogram -- including a signal and
+    its own polarity inversion -- score identically, however different they
+    sound. Transient smear and the "underwater" quality typical of latent
+    audio autoencoders live entirely in this blind spot. The complex term
+    measures ``|STFT(pred) - STFT(target)|``, normalised by the mean target
+    magnitude so it stays scale-invariant and O(1).
+
+    **Stereo (mid/side) term.** The magnitude terms flatten ``(B, C, T)`` to
+    ``(B*C, T)`` and score each channel independently, so the relationship
+    between channels is unconstrained. A decoder can preserve both channel
+    magnitudes perfectly while destroying the stereo image -- and a
+    polarity-flipped channel disappears on mono fold-down. Scoring the
+    mid/side decomposition constrains the image directly.
+
+    Both extra terms default to on. Set ``phase_weight=0.0`` and
+    ``stereo_weight=0.0`` to recover the previous magnitude-only behaviour.
     """
 
     def __init__(
@@ -32,11 +51,30 @@ class MultiResolutionSTFTLoss(nn.Module):
         fft_sizes: tuple = (2048, 1024, 512, 256),
         hop_sizes: tuple = (512, 256, 128, 64),
         win_sizes: tuple = (2048, 1024, 512, 256),
+        sc_weight: float = 1.0,
+        log_mag_weight: float = 1.0,
+        phase_weight: float = 1.0,
+        stereo_weight: float = 1.0,
+        log_eps: float = 1e-5,
     ):
         super().__init__()
         self.fft_sizes = fft_sizes
         self.hop_sizes = hop_sizes
         self.win_sizes = win_sizes
+        self.sc_weight = sc_weight
+        self.log_mag_weight = log_mag_weight
+        self.phase_weight = phase_weight
+        self.stereo_weight = stereo_weight
+        self.log_eps = log_eps
+
+        # Cache one Hann window per resolution instead of reallocating
+        # on every forward pass.
+        for win_size in sorted(set(win_sizes)):
+            self.register_buffer(
+                f"window_{win_size}",
+                torch.hann_window(win_size),
+                persistent=False,
+            )
 
     def _stft(
         self,
@@ -45,20 +83,109 @@ class MultiResolutionSTFTLoss(nn.Module):
         hop_size: int,
         win_size: int,
     ) -> torch.Tensor:
-        """Compute STFT magnitude."""
+        """Compute the complex STFT, flattening any channel dimension."""
         # x shape: (batch, samples) or (batch, channels, samples)
         if x.dim() == 3:
             batch, channels, samples = x.shape
             x = x.reshape(batch * channels, samples)
-        else:
-            batch = x.shape[0]
 
-        window = torch.hann_window(win_size, device=x.device)
-        stft = torch.stft(
+        # The FFT backends reject bf16 and fp16 outright ("MKL FFT doesn't
+        # support tensors of type: BFloat16"), and the VAE stage trains in
+        # bf16 by default, so promote to float32 here rather than crashing
+        # on the first step.
+        x = x.float()
+
+        window = getattr(self, f"window_{win_size}").to(x.device, x.dtype)
+        return torch.stft(
             x, fft_size, hop_size, win_size, window,
             return_complex=True,
         )
-        return stft.abs()
+
+    @staticmethod
+    def _mid_side(x: torch.Tensor) -> torch.Tensor:
+        """Convert (batch, 2, samples) L/R audio to stacked mid/side."""
+        left, right = x[:, 0], x[:, 1]
+        mid = (left + right) * 0.5
+        side = (left - right) * 0.5
+        return torch.stack([mid, side], dim=1)
+
+    def _spectral_terms(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Accumulate the per-resolution terms for one channel layout."""
+        sc_total = pred.new_zeros(())
+        log_total = pred.new_zeros(())
+        phase_total = pred.new_zeros(())
+
+        for fft_size, hop_size, win_size in zip(
+            self.fft_sizes, self.hop_sizes, self.win_sizes
+        ):
+            pred_stft = self._stft(pred, fft_size, hop_size, win_size)
+            target_stft = self._stft(target, fft_size, hop_size, win_size)
+
+            pred_mag = pred_stft.abs()
+            target_mag = target_stft.abs()
+
+            # Spectral convergence loss
+            sc_total = sc_total + torch.norm(target_mag - pred_mag, p="fro") / (
+                torch.norm(target_mag, p="fro") + 1e-8
+            )
+
+            # Log-magnitude loss. Clamping rather than adding the epsilon
+            # keeps near-silent bins from dominating the gradient: with a
+            # 1e-8 additive floor an empty bin contributes log(1e-8) ~= -18.4.
+            log_total = log_total + F.l1_loss(
+                torch.log(pred_mag.clamp_min(self.log_eps)),
+                torch.log(target_mag.clamp_min(self.log_eps)),
+            )
+
+            if self.phase_weight > 0:
+                # Complex error modulus, normalised by mean target magnitude.
+                # The +1e-12 keeps the gradient of sqrt finite at zero error.
+                diff = pred_stft - target_stft
+                modulus = torch.sqrt(diff.real ** 2 + diff.imag ** 2 + 1e-12)
+                phase_total = phase_total + modulus.mean() / (
+                    target_mag.mean() + 1e-8
+                )
+
+        num_resolutions = len(self.fft_sizes)
+        return {
+            "sc": sc_total / num_resolutions,
+            "log_mag": log_total / num_resolutions,
+            "phase": phase_total / num_resolutions,
+        }
+
+    def components(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Return the individual loss terms, for logging and diagnostics.
+
+        Keys: ``sc``, ``log_mag``, ``phase``, ``stereo``, ``total``.
+        """
+        terms = self._spectral_terms(pred, target)
+
+        stereo = pred.new_zeros(())
+        if self.stereo_weight > 0 and pred.dim() == 3 and pred.shape[1] == 2:
+            ms_terms = self._spectral_terms(
+                self._mid_side(pred), self._mid_side(target)
+            )
+            stereo = ms_terms["sc"] + ms_terms["log_mag"]
+            if self.phase_weight > 0:
+                stereo = stereo + self.phase_weight * ms_terms["phase"]
+
+        total = (
+            self.sc_weight * terms["sc"]
+            + self.log_mag_weight * terms["log_mag"]
+            + self.phase_weight * terms["phase"]
+            + self.stereo_weight * stereo
+        )
+
+        return {**terms, "stereo": stereo, "total": total}
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """
@@ -71,28 +198,7 @@ class MultiResolutionSTFTLoss(nn.Module):
         Returns:
             Scalar loss value.
         """
-        total_loss = 0.0
-
-        for fft_size, hop_size, win_size in zip(
-            self.fft_sizes, self.hop_sizes, self.win_sizes
-        ):
-            pred_mag = self._stft(pred, fft_size, hop_size, win_size)
-            target_mag = self._stft(target, fft_size, hop_size, win_size)
-
-            # Spectral convergence loss
-            sc_loss = torch.norm(target_mag - pred_mag, p="fro") / (
-                torch.norm(target_mag, p="fro") + 1e-8
-            )
-
-            # Log-magnitude loss
-            log_loss = F.l1_loss(
-                torch.log(pred_mag + 1e-8),
-                torch.log(target_mag + 1e-8),
-            )
-
-            total_loss += sc_loss + log_loss
-
-        return total_loss / len(self.fft_sizes)
+        return self.components(pred, target)["total"]
 
 
 class VAELoss(nn.Module):
@@ -111,6 +217,8 @@ class VAELoss(nn.Module):
         kl_weight: float = 1e-4,
         spectral_weight: float = 1.0,
         l1_weight: float = 0.1,
+        phase_weight: float = 1.0,
+        stereo_weight: float = 1.0,
     ):
         super().__init__()
         self.recon_weight = recon_weight
@@ -118,7 +226,10 @@ class VAELoss(nn.Module):
         self.spectral_weight = spectral_weight
         self.l1_weight = l1_weight
 
-        self.spectral_loss = MultiResolutionSTFTLoss()
+        self.spectral_loss = MultiResolutionSTFTLoss(
+            phase_weight=phase_weight,
+            stereo_weight=stereo_weight,
+        )
 
     def forward(
         self,
@@ -142,8 +253,9 @@ class VAELoss(nn.Module):
         # L1 reconstruction loss
         l1_loss = F.l1_loss(reconstruction, target)
 
-        # Multi-resolution STFT loss
-        spectral_loss = self.spectral_loss(reconstruction, target)
+        # Multi-resolution STFT loss (magnitude + phase + stereo image)
+        spectral = self.spectral_loss.components(reconstruction, target)
+        spectral_loss = spectral["total"]
 
         # KL divergence
         kl_loss = -0.5 * torch.mean(
@@ -162,6 +274,11 @@ class VAELoss(nn.Module):
             "l1_loss": l1_loss,
             "spectral_loss": spectral_loss,
             "kl_loss": kl_loss,
+            # Diagnostics: which part of the spectral objective is unhappy.
+            "spectral_sc": spectral["sc"],
+            "spectral_log_mag": spectral["log_mag"],
+            "spectral_phase": spectral["phase"],
+            "spectral_stereo": spectral["stereo"],
         }
 
 

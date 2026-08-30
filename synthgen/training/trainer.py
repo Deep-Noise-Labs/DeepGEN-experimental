@@ -68,6 +68,26 @@ def load_vae_weights_into_synthgen(model: SynthGen, checkpoint_path: str, device
         raise ValueError(f"No VAE weights found in checkpoint: {checkpoint_path}")
 
     missing, unexpected = model.vae.load_state_dict(vae_state, strict=False)
+
+    # A handful of missing keys is benign. A large fraction means the
+    # checkpoint was trained against a different architecture -- most often a
+    # `vae_antialias` mismatch, since the alias-free path uses SnakeBeta and
+    # so names its activation parameters `log_alpha`/`log_beta` rather than
+    # `alpha`. Loading that silently would train Stage 2 against a decoder
+    # whose activations are still at their initial values.
+    expected = len(model.vae.state_dict())
+    if missing and len(missing) > 0.1 * expected:
+        activation_keys = [k for k in missing if "alpha" in k or "beta" in k]
+        hint = (
+            " This looks like a vae_antialias mismatch: the checkpoint and the "
+            "model disagree on whether the VAE uses alias-free activations."
+            if activation_keys else ""
+        )
+        raise ValueError(
+            f"{len(missing)} of {expected} VAE tensors were not found in "
+            f"{checkpoint_path} (e.g. {missing[:5]})." + hint
+        )
+
     if unexpected:
         logger.warning("Unexpected VAE keys ignored: %s", unexpected[:10])
     if missing:
@@ -85,6 +105,9 @@ class TrainingConfig:
 
     # Model
     vae_latent_dim: int = 64
+    # Run VAE nonlinearities at 2x rate between matched low-pass resamplers
+    # so they cannot fold harmonics back into the audible band.
+    vae_antialias: bool = True
     dit_model_dim: int = 1024
     dit_num_heads: int = 16
     dit_num_layers: int = 20
@@ -116,6 +139,12 @@ class TrainingConfig:
 
     # Classifier-free guidance (DiT stage)
     cfg_dropout_prob: float = 0.1
+
+    # VAE reconstruction objective. ``vae_phase_weight`` constrains STFT
+    # phase, ``vae_stereo_weight`` constrains the mid/side image. Set both
+    # to 0.0 for the previous magnitude-only behaviour.
+    vae_phase_weight: float = 1.0
+    vae_stereo_weight: float = 1.0
 
     # Logging / experiment tracking
     log_every_steps: int = 100
@@ -248,6 +277,7 @@ class SynthGenTrainer:
             self.model = AudioVAE(
                 in_channels=config.audio_channels,
                 latent_dim=config.vae_latent_dim,
+                antialias=config.vae_antialias,
             ).to(self.device)
         else:
             self.model = SynthGen(
@@ -340,7 +370,10 @@ class SynthGenTrainer:
     def _init_loss(self):
         """Initialize loss functions."""
         if self.config.stage == "vae":
-            self.loss_fn = VAELoss()
+            self.loss_fn = VAELoss(
+                phase_weight=self.config.vae_phase_weight,
+                stereo_weight=self.config.vae_stereo_weight,
+            )
         else:
             self.loss_fn = FlowMatchingLoss(weighting="min_snr")
 

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 import torch
 
 from synthgen.model.synthgen import SynthGen
@@ -88,3 +89,48 @@ def test_config_yaml_new_fields():
     vae_cfg = TrainingConfig.from_yaml("configs/vae_audiocaps.yaml")
     assert vae_cfg.stage == "vae"
     assert vae_cfg.data_dir.endswith("audiocaps")
+
+
+def test_antialias_mismatch_raises_rather_than_loading_silently(tmp_path: Path):
+    """
+    The alias-free path names its activation parameters log_alpha/log_beta,
+    so a checkpoint trained the other way round would leave every activation
+    at its initial value. That must fail loudly, not warn.
+    """
+    legacy = AudioVAE(
+        in_channels=2, latent_dim=32, base_channels=16,
+        strides=(4, 4, 4, 4), antialias=False,
+    )
+    ckpt_path = tmp_path / "legacy_vae.pt"
+    torch.save({"model_state_dict": legacy.state_dict()}, ckpt_path)
+
+    model = SynthGen(
+        vae_latent_dim=32, vae_base_channels=16, vae_strides=(4, 4, 4, 4),
+        vae_antialias=True,
+        dit_model_dim=64, dit_num_heads=4, dit_num_layers=2,
+        use_dummy_text_encoder=True,
+    )
+
+    with pytest.raises(ValueError, match="vae_antialias"):
+        load_vae_weights_into_synthgen(model, str(ckpt_path), torch.device("cpu"))
+
+
+def test_matching_antialias_setting_still_loads(tmp_path: Path):
+    legacy = AudioVAE(
+        in_channels=2, latent_dim=32, base_channels=16,
+        strides=(4, 4, 4, 4), antialias=False,
+    )
+    with torch.no_grad():
+        for p in legacy.parameters():
+            p.fill_(0.321)
+    ckpt_path = tmp_path / "legacy_vae.pt"
+    torch.save({"model_state_dict": legacy.state_dict()}, ckpt_path)
+
+    model = SynthGen(
+        vae_latent_dim=32, vae_base_channels=16, vae_strides=(4, 4, 4, 4),
+        vae_antialias=False,
+        dit_model_dim=64, dit_num_heads=4, dit_num_layers=2,
+        use_dummy_text_encoder=True,
+    )
+    load_vae_weights_into_synthgen(model, str(ckpt_path), torch.device("cpu"))
+    assert abs(next(model.vae.parameters()).reshape(-1)[0].item() - 0.321) < 1e-5

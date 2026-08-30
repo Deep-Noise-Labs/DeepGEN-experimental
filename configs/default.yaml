@@ -3,6 +3,7 @@
 
 # Model Architecture
 vae_latent_dim: 64
+vae_antialias: true
 dit_model_dim: 1024
 dit_num_heads: 16
 dit_num_layers: 20
@@ -52,3 +53,7 @@ num_workers: 8
 
 # Classifier-Free Guidance
 cfg_dropout_prob: 0.1
+
+# VAE reconstruction objective (stage: "vae")
+vae_phase_weight: 1.0
+vae_stereo_weight: 1.0

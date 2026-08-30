@@ -29,6 +29,10 @@ class Snake(nn.Module):
 
     Provides periodic inductive bias that is beneficial for audio synthesis,
     as shown in BigVGAN and Stable Audio.
+
+    Note the numerical hazard: ``alpha`` is unconstrained, so a training step
+    that drives it towards zero makes ``1/alpha`` explode. ``SnakeBeta`` below
+    removes that failure mode by parameterising in log space.
     """
 
     def __init__(self, channels: int, alpha_init: float = 1.0):
@@ -39,6 +43,198 @@ class Snake(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + (1.0 / (self.alpha + 1e-8)) * torch.sin(self.alpha * x) ** 2
+
+
+class SnakeBeta(nn.Module):
+    """
+    Snake activation with an independent magnitude parameter:
+
+        x + (1/beta) * sin^2(alpha * x)
+
+    ``alpha`` controls the frequency of the periodic component and ``beta``
+    its magnitude. Both are stored in log space, so they are strictly positive
+    for any parameter value and the reciprocal can never blow up.
+    """
+
+    def __init__(
+        self,
+        channels: int,
+        alpha_init: float = 1.0,
+        beta_init: float = 1.0,
+    ):
+        super().__init__()
+        self.log_alpha = nn.Parameter(
+            torch.full((1, channels, 1), math.log(alpha_init))
+        )
+        self.log_beta = nn.Parameter(
+            torch.full((1, channels, 1), math.log(beta_init))
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        alpha = self.log_alpha.exp()
+        beta = self.log_beta.exp()
+        return x + (1.0 / beta) * torch.sin(alpha * x) ** 2
+
+
+# =============================================================================
+# Alias-free resampling (Kaiser-windowed sinc)
+# =============================================================================
+#
+# A pointwise nonlinearity generates harmonics above the Nyquist frequency of
+# the signal it is applied to. At the native rate those harmonics fold back
+# down as inharmonic partials -- the "cheap digital" grit that separates a
+# neural synth from Serum or a Spitfire library. The standard remedy, from
+# Karras et al. (Alias-Free GAN) and BigVGAN, is to run the nonlinearity at
+# 2x rate between a matched pair of low-pass resamplers, so the harmonics it
+# creates are removed before decimation instead of aliasing.
+#
+# Filter design follows the reference alias-free-torch implementation (MIT).
+
+
+def kaiser_sinc_filter1d(
+    cutoff: float,
+    half_width: float,
+    kernel_size: int,
+) -> torch.Tensor:
+    """
+    Build a 1D low-pass FIR kernel as a Kaiser-windowed sinc.
+
+    Args:
+        cutoff: Normalised cutoff frequency (cycles/sample), in (0, 0.5).
+        half_width: Normalised width of the transition band.
+        kernel_size: Number of taps.
+
+    Returns:
+        Kernel of shape (1, 1, kernel_size), normalised to unit DC gain.
+    """
+    even = kernel_size % 2 == 0
+    half_size = kernel_size // 2
+
+    # Kaiser beta from the required stop-band attenuation
+    delta_f = 4 * half_width
+    attenuation = 2.285 * (half_size - 1) * math.pi * delta_f + 7.95
+    if attenuation > 50.0:
+        beta = 0.1102 * (attenuation - 8.7)
+    elif attenuation >= 21.0:
+        beta = 0.5842 * (attenuation - 21.0) ** 0.4 + 0.07886 * (attenuation - 21.0)
+    else:
+        beta = 0.0
+
+    window = torch.kaiser_window(kernel_size, beta=beta, periodic=False)
+
+    if even:
+        time = torch.arange(-half_size, half_size) + 0.5
+    else:
+        time = torch.arange(kernel_size) - half_size
+
+    if cutoff == 0:
+        return torch.zeros(1, 1, kernel_size)
+
+    kernel = 2 * cutoff * window * torch.sinc(2 * cutoff * time)
+    kernel = kernel / kernel.sum()
+    return kernel.view(1, 1, kernel_size)
+
+
+class UpSample1d(nn.Module):
+    """Band-limited 1D upsampling by an integer ratio."""
+
+    def __init__(self, ratio: int = 2, kernel_size: Optional[int] = None):
+        super().__init__()
+        self.ratio = ratio
+        self.kernel_size = kernel_size or (6 * ratio // 2) * 2
+        self.stride = ratio
+        self.pad = self.kernel_size // ratio - 1
+        self.pad_left = self.pad * self.stride + (self.kernel_size - self.stride) // 2
+        self.pad_right = (
+            self.pad * self.stride + (self.kernel_size - self.stride + 1) // 2
+        )
+        self.register_buffer(
+            "filter",
+            kaiser_sinc_filter1d(
+                cutoff=0.5 / ratio,
+                half_width=0.6 / ratio,
+                kernel_size=self.kernel_size,
+            ),
+            persistent=False,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        channels = x.shape[1]
+        x = F.pad(x, (self.pad, self.pad), mode="replicate")
+        x = self.ratio * F.conv_transpose1d(
+            x,
+            self.filter.expand(channels, -1, -1).to(x.dtype),
+            stride=self.stride,
+            groups=channels,
+        )
+        return x[..., self.pad_left : -self.pad_right]
+
+
+class DownSample1d(nn.Module):
+    """Band-limited 1D decimation by an integer ratio."""
+
+    def __init__(self, ratio: int = 2, kernel_size: Optional[int] = None):
+        super().__init__()
+        self.ratio = ratio
+        self.kernel_size = kernel_size or (6 * ratio // 2) * 2
+        self.even = self.kernel_size % 2 == 0
+        self.pad_left = self.kernel_size // 2 - int(self.even)
+        self.pad_right = self.kernel_size // 2
+        self.register_buffer(
+            "filter",
+            kaiser_sinc_filter1d(
+                cutoff=0.5 / ratio,
+                half_width=0.6 / ratio,
+                kernel_size=self.kernel_size,
+            ),
+            persistent=False,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        channels = x.shape[1]
+        x = F.pad(x, (self.pad_left, self.pad_right), mode="replicate")
+        return F.conv1d(
+            x,
+            self.filter.expand(channels, -1, -1).to(x.dtype),
+            stride=self.ratio,
+            groups=channels,
+        )
+
+
+class AliasFreeSnake(nn.Module):
+    """
+    Snake activation evaluated at ``ratio`` times the native sample rate.
+
+    Upsample -> SnakeBeta -> downsample. The harmonics the nonlinearity
+    generates above the original Nyquist frequency are removed by the
+    decimation filter rather than folding back into the audible band.
+
+    Costs roughly ``ratio`` times the activation compute of a plain Snake;
+    the convolutions around it are unchanged, so end-to-end VAE step time
+    grows by substantially less than ``ratio``.
+    """
+
+    def __init__(
+        self,
+        channels: int,
+        alpha_init: float = 1.0,
+        ratio: int = 2,
+        kernel_size: int = 12,
+    ):
+        super().__init__()
+        self.upsample = UpSample1d(ratio=ratio, kernel_size=kernel_size)
+        self.activation = SnakeBeta(channels, alpha_init=alpha_init)
+        self.downsample = DownSample1d(ratio=ratio, kernel_size=kernel_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.downsample(self.activation(self.upsample(x)))
+
+
+def make_activation(channels: int, antialias: bool = True) -> nn.Module:
+    """Return the configured activation for a given channel count."""
+    if antialias:
+        return AliasFreeSnake(channels)
+    return Snake(channels)
 
 
 # =============================================================================
@@ -54,19 +250,20 @@ class ResidualBlock(nn.Module):
         channels: int,
         dilation: int = 1,
         kernel_size: int = 7,
+        antialias: bool = True,
     ):
         super().__init__()
         padding = (kernel_size - 1) * dilation // 2
 
         self.block = nn.Sequential(
-            Snake(channels),
+            make_activation(channels, antialias),
             nn.Conv1d(
                 channels, channels,
                 kernel_size=kernel_size,
                 dilation=dilation,
                 padding=padding,
             ),
-            Snake(channels),
+            make_activation(channels, antialias),
             nn.Conv1d(channels, channels, kernel_size=1),
         )
 
@@ -88,18 +285,19 @@ class EncoderBlock(nn.Module):
         stride: int = 4,
         num_residual: int = 3,
         dilations: tuple = (1, 3, 9),
+        antialias: bool = True,
     ):
         super().__init__()
 
         # Residual layers with increasing dilation
         self.residual_layers = nn.Sequential(*[
-            ResidualBlock(in_channels, dilation=d)
+            ResidualBlock(in_channels, dilation=d, antialias=antialias)
             for d in dilations[:num_residual]
         ])
 
         # Downsampling via strided convolution
         self.downsample = nn.Sequential(
-            Snake(in_channels),
+            make_activation(in_channels, antialias),
             nn.Conv1d(
                 in_channels, out_channels,
                 kernel_size=stride * 2,
@@ -125,12 +323,13 @@ class DecoderBlock(nn.Module):
         stride: int = 4,
         num_residual: int = 3,
         dilations: tuple = (1, 3, 9),
+        antialias: bool = True,
     ):
         super().__init__()
 
         # Upsampling via transposed convolution
         self.upsample = nn.Sequential(
-            Snake(in_channels),
+            make_activation(in_channels, antialias),
             nn.ConvTranspose1d(
                 in_channels, out_channels,
                 kernel_size=stride * 2,
@@ -142,7 +341,7 @@ class DecoderBlock(nn.Module):
 
         # Residual layers
         self.residual_layers = nn.Sequential(*[
-            ResidualBlock(out_channels, dilation=d)
+            ResidualBlock(out_channels, dilation=d, antialias=antialias)
             for d in dilations[:num_residual]
         ])
 
@@ -176,6 +375,7 @@ class AudioEncoder(nn.Module):
         channel_multipliers: tuple = (1, 2, 4, 8),
         strides: tuple = (4, 4, 8, 8),
         num_residual_per_block: int = 3,
+        antialias: bool = True,
     ):
         super().__init__()
 
@@ -203,15 +403,16 @@ class AudioEncoder(nn.Module):
                     out_channels=out_channels,
                     stride=stride,
                     num_residual=num_residual_per_block,
+                    antialias=antialias,
                 )
             )
             current_channels = out_channels
 
         # Bottleneck
         self.bottleneck = nn.Sequential(
-            ResidualBlock(current_channels, dilation=1),
-            ResidualBlock(current_channels, dilation=3),
-            Snake(current_channels),
+            ResidualBlock(current_channels, dilation=1, antialias=antialias),
+            ResidualBlock(current_channels, dilation=3, antialias=antialias),
+            make_activation(current_channels, antialias),
         )
 
         # Output projection to latent space (mean and log-var)
@@ -260,6 +461,7 @@ class AudioDecoder(nn.Module):
         channel_multipliers: tuple = (8, 4, 2, 1),
         strides: tuple = (8, 8, 4, 4),
         num_residual_per_block: int = 3,
+        antialias: bool = True,
     ):
         super().__init__()
 
@@ -272,8 +474,8 @@ class AudioDecoder(nn.Module):
 
         # Pre-bottleneck
         self.bottleneck = nn.Sequential(
-            ResidualBlock(first_channels, dilation=1),
-            ResidualBlock(first_channels, dilation=3),
+            ResidualBlock(first_channels, dilation=1, antialias=antialias),
+            ResidualBlock(first_channels, dilation=3, antialias=antialias),
         )
 
         # Decoder blocks
@@ -293,13 +495,14 @@ class AudioDecoder(nn.Module):
                     out_channels=out_ch,
                     stride=stride,
                     num_residual=num_residual_per_block,
+                    antialias=antialias,
                 )
             )
             current_channels = out_ch
 
         # Output projection (no tanh to avoid harmonic distortion)
         self.output_conv = nn.Sequential(
-            Snake(current_channels),
+            make_activation(current_channels, antialias),
             nn.Conv1d(current_channels, out_channels, kernel_size=7, padding=3),
         )
         self.output_conv[1] = nn.utils.parametrizations.weight_norm(self.output_conv[1])
@@ -346,10 +549,12 @@ class AudioVAE(nn.Module):
         decoder_channel_multipliers: tuple = (8, 4, 2, 1),
         strides: tuple = (4, 4, 8, 8),
         num_residual_per_block: int = 3,
+        antialias: bool = True,
     ):
         super().__init__()
 
         self.latent_dim = latent_dim
+        self.antialias = antialias
         self.compression_ratio = 1
         for s in strides:
             self.compression_ratio *= s
@@ -361,6 +566,7 @@ class AudioVAE(nn.Module):
             channel_multipliers=encoder_channel_multipliers,
             strides=strides,
             num_residual_per_block=num_residual_per_block,
+            antialias=antialias,
         )
 
         self.decoder = AudioDecoder(
@@ -370,6 +576,7 @@ class AudioVAE(nn.Module):
             channel_multipliers=decoder_channel_multipliers,
             strides=tuple(reversed(strides)),
             num_residual_per_block=num_residual_per_block,
+            antialias=antialias,
         )
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
