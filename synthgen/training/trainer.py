@@ -68,6 +68,26 @@ def load_vae_weights_into_synthgen(model: SynthGen, checkpoint_path: str, device
         raise ValueError(f"No VAE weights found in checkpoint: {checkpoint_path}")
 
     missing, unexpected = model.vae.load_state_dict(vae_state, strict=False)
+
+    # A handful of missing keys is benign. A large fraction means the
+    # checkpoint was trained against a different architecture -- most often a
+    # `vae_antialias` mismatch, since the alias-free path uses SnakeBeta and
+    # so names its activation parameters `log_alpha`/`log_beta` rather than
+    # `alpha`. Loading that silently would train Stage 2 against a decoder
+    # whose activations are still at their initial values.
+    expected = len(model.vae.state_dict())
+    if missing and len(missing) > 0.1 * expected:
+        activation_keys = [k for k in missing if "alpha" in k or "beta" in k]
+        hint = (
+            " This looks like a vae_antialias mismatch: the checkpoint and the "
+            "model disagree on whether the VAE uses alias-free activations."
+            if activation_keys else ""
+        )
+        raise ValueError(
+            f"{len(missing)} of {expected} VAE tensors were not found in "
+            f"{checkpoint_path} (e.g. {missing[:5]})." + hint
+        )
+
     if unexpected:
         logger.warning("Unexpected VAE keys ignored: %s", unexpected[:10])
     if missing:
