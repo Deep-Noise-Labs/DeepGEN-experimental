@@ -44,6 +44,32 @@ and the resampling filters roll off slightly below Nyquist, which is the
 -2.2 dB at 18 kHz above. In exchange the aliased partial drops by ~47 dB.
 Set `vae_antialias: false` to compare.
 
+### It reduces aliasing; it does not eliminate it
+
+Worth stating plainly, because a spectrogram of a sweep through several
+chained activations still shows folded traces after the change. Oversampling
+at 2x only catches harmonics falling between Nyquist and twice Nyquist.
+Anything above *that* still folds, and a stack of chained Snake activations
+generates plenty of it.
+
+The effect also depends on pitch, exactly as the physics says it should.
+Energy below the fundamental - which a nonlinearity cannot produce except by
+folding - measured in 0.4 s windows as a 300 Hz to 5.5 kHz sweep rises
+through four chained activations:
+
+| Fundamental | Harmonics below Nyquist | Before | After | Change |
+|---|---|---|---|---|
+| 813 Hz | 27 | 63.3 dB | 62.8 dB | -0.5 dB |
+| 1232 Hz | 18 | 40.3 dB | 39.8 dB | -0.5 dB |
+| 1867 Hz | 12 | 0.3 dB | -0.1 dB | -0.4 dB |
+| 2829 Hz | 8 | 9.5 dB | 7.2 dB | -2.3 dB |
+| 4286 Hz | 5 | 27.1 dB | 12.0 dB | -15.1 dB |
+
+While the harmonics still fit under Nyquist there is no folding to remove and
+the change does nothing. The benefit arrives as the pitch climbs - which is
+where synth patches and sample libraries live. `AliasFreeSnake(ratio=4)` is
+available if the residual matters more than the compute.
+
 ### Also: the old Snake had a pole
 
 `1 / (alpha + 1e-8)` with `alpha` an unconstrained learnable parameter goes
