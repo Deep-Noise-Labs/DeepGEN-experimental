@@ -118,6 +118,33 @@ Two terms were added to `MultiResolutionSTFTLoss`:
 Both default to on. `vae_phase_weight: 0.0` and `vae_stereo_weight: 0.0`
 restore the previous objective exactly.
 
+### Confirmed by training, not just by construction
+
+The tables above are constructed counterexamples. A paired training run gave
+the same result by gradient descent on real audio: two identical 237k-parameter
+VAEs at 64x compression, same seed, same data, same optimiser, 2500 steps each,
+differing only in the objective and the activations.
+
+The magnitude-only arm converged to reconstructions that are **upside down**.
+Six of eight clips came out with negative waveform correlation against the
+target. On the two clips it fitted best, SDR reads -6.07 dB as measured - and
++11.57 dB once the polarity is flipped by hand. It had learned the sound
+perfectly well and had no gradient telling it which way up to put it.
+
+| Measure | Magnitude-only | Phase + mid/side |
+|---|---|---|
+| Mean waveform correlation | **-0.368** | **+0.807** |
+| Mean SDR | -3.77 dB | **+6.89 dB** |
+| Waveform L1 | 0.2295 | **0.0799** |
+| Phase, complex STFT | 1.4894 | **0.6438** |
+| Stereo, mid/side | 3.7647 | **2.4314** |
+| Spectral convergence | **0.3719** | 0.4303 |
+| Log-magnitude | **0.7576** | 0.8180 |
+
+Note the last two rows: the new objective is slightly *worse* on the two
+magnitude terms. That is the trade working as intended - it stops spending
+capacity on a metric that cannot hear phase, and buys 10.7 dB of SDR with it.
+
 The log-magnitude floor was also changed from an additive `1e-8` to a clamp
 at `1e-5`. With the additive floor an empty bin contributes `log(1e-8) =
 -18.4`, so silence dominated the gradient in exactly the quiet passages where
