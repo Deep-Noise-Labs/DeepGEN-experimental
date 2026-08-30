@@ -89,6 +89,12 @@ class MultiResolutionSTFTLoss(nn.Module):
             batch, channels, samples = x.shape
             x = x.reshape(batch * channels, samples)
 
+        # The FFT backends reject bf16 and fp16 outright ("MKL FFT doesn't
+        # support tensors of type: BFloat16"), and the VAE stage trains in
+        # bf16 by default, so promote to float32 here rather than crashing
+        # on the first step.
+        x = x.float()
+
         window = getattr(self, f"window_{win_size}").to(x.device, x.dtype)
         return torch.stft(
             x, fft_size, hop_size, win_size, window,

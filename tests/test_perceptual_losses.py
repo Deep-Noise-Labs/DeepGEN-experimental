@@ -133,6 +133,19 @@ class TestBackwardCompatibility:
         components = perceptual.components(mono, mono)
         assert components["stereo"].item() == 0.0
 
+    @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_runs_under_reduced_precision(self, dtype):
+        """
+        The VAE stage trains in bf16 by default, and the FFT backends reject
+        bf16 and fp16 tensors outright. The loss promotes to float32 rather
+        than crashing on the first step.
+        """
+        loss = MultiResolutionSTFTLoss(**FFT_KWARGS)
+        target = _stereo_music(seconds=0.2)
+        value = loss(target.to(dtype) * 0.9, target.to(dtype))
+        assert torch.isfinite(value)
+        assert value.item() > 0
+
     def test_gradients_flow_through_every_term(self):
         loss = MultiResolutionSTFTLoss(**FFT_KWARGS)
         pred = _stereo_music().requires_grad_(True)
