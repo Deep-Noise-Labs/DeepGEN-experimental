@@ -85,6 +85,9 @@ class TrainingConfig:
 
     # Model
     vae_latent_dim: int = 64
+    # Run VAE nonlinearities at 2x rate between matched low-pass resamplers
+    # so they cannot fold harmonics back into the audible band.
+    vae_antialias: bool = True
     dit_model_dim: int = 1024
     dit_num_heads: int = 16
     dit_num_layers: int = 20
@@ -116,6 +119,12 @@ class TrainingConfig:
 
     # Classifier-free guidance (DiT stage)
     cfg_dropout_prob: float = 0.1
+
+    # VAE reconstruction objective. ``vae_phase_weight`` constrains STFT
+    # phase, ``vae_stereo_weight`` constrains the mid/side image. Set both
+    # to 0.0 for the previous magnitude-only behaviour.
+    vae_phase_weight: float = 1.0
+    vae_stereo_weight: float = 1.0
 
     # Logging / experiment tracking
     log_every_steps: int = 100
@@ -248,6 +257,7 @@ class SynthGenTrainer:
             self.model = AudioVAE(
                 in_channels=config.audio_channels,
                 latent_dim=config.vae_latent_dim,
+                antialias=config.vae_antialias,
             ).to(self.device)
         else:
             self.model = SynthGen(
@@ -340,7 +350,10 @@ class SynthGenTrainer:
     def _init_loss(self):
         """Initialize loss functions."""
         if self.config.stage == "vae":
-            self.loss_fn = VAELoss()
+            self.loss_fn = VAELoss(
+                phase_weight=self.config.vae_phase_weight,
+                stereo_weight=self.config.vae_stereo_weight,
+            )
         else:
             self.loss_fn = FlowMatchingLoss(weighting="min_snr")
 
