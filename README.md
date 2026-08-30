@@ -26,6 +26,13 @@ The architecture draws from state-of-the-art research in text-to-audio generatio
 
 **Why T5-base?** T5-base provides a strong text understanding backbone that has been validated across multiple audio generation systems (Stable Audio, AudioLDM). It balances quality with computational efficiency.
 
+**Audio fidelity.** The VAE decoder is a hard ceiling on the whole system —
+nothing the DiT generates can be better than what the decoder can reconstruct.
+VAE nonlinearities therefore run alias-free (2× oversampled Snake, after
+BigVGAN) and the reconstruction objective constrains STFT phase and the
+mid/side stereo image, not just per-channel magnitude. Rationale, measurements
+and the remaining ceilings: [docs/AUDIO_FIDELITY.md](docs/AUDIO_FIDELITY.md).
+
 ## Key Features
 
 - Text-conditioned generation of short audio samples (3–15 seconds)
@@ -61,6 +68,7 @@ synthgen-experimental/
 ├── tests/               # Unit and integration tests
 ├── docs/                # Documentation
 │   ├── TRAINING.md      # Training guidelines
+│   ├── AUDIO_FIDELITY.md    # Stage-1 quality ceiling: aliasing, phase, stereo
 │   ├── CLEARML.md       # ClearML setup and upload policy
 │   └── TRITON_INFERENCE.md  # Triton deployment guide
 ├── configs/             # Configuration files
