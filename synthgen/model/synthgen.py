@@ -168,6 +168,9 @@ class SynthGen(nn.Module):
         vae_latent_dim: int = 64,
         vae_base_channels: int = 64,
         vae_strides: tuple = (4, 4, 8, 8),
+        vae_activation: str = "snakebeta",
+        vae_anti_aliased_decoder: bool = True,
+        vae_anti_aliased_encoder: bool = False,
         # DiT parameters
         dit_model_dim: int = 1024,
         dit_num_heads: int = 16,
@@ -198,6 +201,9 @@ class SynthGen(nn.Module):
             latent_dim=vae_latent_dim,
             base_channels=vae_base_channels,
             strides=vae_strides,
+            activation=vae_activation,
+            anti_aliased_decoder=vae_anti_aliased_decoder,
+            anti_aliased_encoder=vae_anti_aliased_encoder,
         )
 
         # Text Encoder

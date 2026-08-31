@@ -35,3 +35,13 @@ wandb_project: "synthgen"
 data_dir: "./data/audiocaps"
 num_workers: 4
 max_samples: null
+
+# Architecture / objective (pipeline-validation budget)
+vae_activation: "snakebeta"
+vae_anti_aliased_decoder: true
+vae_anti_aliased_encoder: false
+mel_weight: 15.0
+# Adversarial training off for this run: 10k steps is a plumbing check, and the
+# critics only start earning their compute well after the decoder can already
+# reconstruct. Use configs/vae_gan.yaml for a quality run.
+vae_adversarial: false

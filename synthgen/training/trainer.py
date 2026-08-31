@@ -29,7 +29,14 @@ from synthgen.tracking import build_tracker
 from synthgen.tracking.dataset_registry import register_dataset_metadata
 from synthgen.tracking.null import NullTracker
 from synthgen.tracking.tracker import ExperimentTracker, config_as_dict, get_clearml_task
-from synthgen.training.losses import FlowMatchingLoss, VAELoss
+from synthgen.training.discriminators import CombinedDiscriminator
+from synthgen.training.losses import (
+    FlowMatchingLoss,
+    VAELoss,
+    discriminator_adversarial_loss,
+    feature_matching_loss,
+    generator_adversarial_loss,
+)
 from synthgen.training.scheduler import WarmupCosineScheduler
 
 logger = logging.getLogger(__name__)
@@ -85,6 +92,9 @@ class TrainingConfig:
 
     # Model
     vae_latent_dim: int = 64
+    vae_activation: str = "snakebeta"  # "snakebeta" (default) or "snake" (pre-0.2)
+    vae_anti_aliased_decoder: bool = True
+    vae_anti_aliased_encoder: bool = False
     dit_model_dim: int = 1024
     dit_num_heads: int = 16
     dit_num_layers: int = 20
@@ -113,6 +123,24 @@ class TrainingConfig:
     save_every_steps: int = 5000
     resume_from: str | None = None
     vae_checkpoint: str | None = None
+
+    # Adversarial VAE training (stage == "vae")
+    # The reconstruction terms alone converge to the conditional mean, which is
+    # the blurry/phasey sound every regression-only audio autoencoder produces.
+    # The discriminator is what buys back transient detail and phase coherence.
+    vae_adversarial: bool = True
+    disc_start_step: int = 20000  # reconstruction-only warm-up before the GAN
+    disc_learning_rate: float = 1e-4
+    # The critic updates once per micro-batch by default, matching the
+    # HiFi-GAN/DAC 1:1 ratio. Raise it to gradient_accumulation_steps if the
+    # critic starts outrunning the generator (disc_loss collapsing to ~0).
+    disc_update_every: int = 1
+    adv_weight: float = 1.0
+    feature_matching_weight: float = 2.0
+    disc_periods: tuple = (2, 3, 5, 7, 11)
+    disc_fft_sizes: tuple = (2048, 1024, 512)
+    disc_hop_sizes: tuple = (512, 256, 128)
+    mel_weight: float = 15.0
 
     # Classifier-free guidance (DiT stage)
     cfg_dropout_prob: float = 0.1
@@ -244,14 +272,29 @@ class SynthGenTrainer:
         """Initialize the model."""
         config = self.config
 
+        self.discriminator = None
+
         if config.stage == "vae":
             self.model = AudioVAE(
                 in_channels=config.audio_channels,
                 latent_dim=config.vae_latent_dim,
+                activation=config.vae_activation,
+                anti_aliased_decoder=config.vae_anti_aliased_decoder,
+                anti_aliased_encoder=config.vae_anti_aliased_encoder,
             ).to(self.device)
+
+            if config.vae_adversarial:
+                self.discriminator = CombinedDiscriminator(
+                    periods=tuple(config.disc_periods),
+                    fft_sizes=tuple(config.disc_fft_sizes),
+                    hop_sizes=tuple(config.disc_hop_sizes),
+                ).to(self.device)
         else:
             self.model = SynthGen(
                 vae_latent_dim=config.vae_latent_dim,
+                vae_activation=config.vae_activation,
+                vae_anti_aliased_decoder=config.vae_anti_aliased_decoder,
+                vae_anti_aliased_encoder=config.vae_anti_aliased_encoder,
                 dit_model_dim=config.dit_model_dim,
                 dit_num_heads=config.dit_num_heads,
                 dit_num_layers=config.dit_num_layers,
@@ -272,6 +315,13 @@ class SynthGenTrainer:
 
         if config.distributed:
             self.model = DDP(self.model, device_ids=[self.rank])
+            if self.discriminator is not None:
+                self.discriminator = DDP(self.discriminator, device_ids=[self.rank])
+
+        if self.discriminator is not None:
+            disc_params = sum(p.numel() for p in self.discriminator.parameters())
+            logger.info("Discriminator parameters: %s", f"{disc_params:,}")
+            self.tracker.log_params({"discriminator_parameters": disc_params})
 
         # Log parameter count
         total_params = sum(p.numel() for p in self.model.parameters())
@@ -307,6 +357,25 @@ class SynthGenTrainer:
             min_lr=config.min_lr,
         )
 
+        # The discriminator gets its own optimiser: it is a separate player in a
+        # min-max game, not another block in the same network.
+        self.disc_optimizer = None
+        self.disc_scheduler = None
+        if self.discriminator is not None:
+            self.disc_optimizer = torch.optim.AdamW(
+                self.discriminator.parameters(),
+                lr=config.disc_learning_rate,
+                weight_decay=config.weight_decay,
+                betas=(0.8, 0.99),  # short beta1: critics must track a moving generator
+                eps=1e-8,
+            )
+            self.disc_scheduler = WarmupCosineScheduler(
+                self.disc_optimizer,
+                warmup_steps=config.warmup_steps,
+                total_steps=max(config.max_steps - config.disc_start_step, 1),
+                min_lr=config.min_lr,
+            )
+
     def _init_data(self):
         """Initialize data loaders."""
         from synthgen.data.dataset import AudioTextDataset, SynthGenCollator
@@ -340,9 +409,67 @@ class SynthGenTrainer:
     def _init_loss(self):
         """Initialize loss functions."""
         if self.config.stage == "vae":
-            self.loss_fn = VAELoss()
+            self.loss_fn = VAELoss(
+                mel_weight=self.config.mel_weight,
+                sample_rate=self.config.sample_rate,
+            ).to(self.device)
         else:
             self.loss_fn = FlowMatchingLoss(weighting="min_snr")
+
+    @property
+    def adversarial_active(self) -> bool:
+        """True once the reconstruction-only warm-up is over."""
+        return (
+            self.discriminator is not None
+            and self.global_step >= self.config.disc_start_step
+        )
+
+    def _discriminator_step(
+        self,
+        reconstruction: torch.Tensor,
+        target: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        One full discriminator update on a detached reconstruction.
+
+        Self-contained (zero, backward, step) so the generator backward that
+        follows can flow through the critic without corrupting anything: those
+        stray gradients on the critic's parameters are discarded by the
+        ``zero_grad`` at the top of the next call.
+
+        Kept out of autocast: hinge logits in bf16 lose the resolution that
+        separates a confident critic from an uncertain one, and the STFT
+        sub-discriminators want full precision regardless.
+        """
+        self.disc_optimizer.zero_grad(set_to_none=True)
+
+        with autocast(dtype=None, enabled=False):
+            logits_real, _ = self.discriminator(target.detach().float())
+            logits_fake, _ = self.discriminator(reconstruction.detach().float())
+            disc_loss = discriminator_adversarial_loss(logits_real, logits_fake)
+
+        disc_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.discriminator.parameters(), max_norm=10.0)
+        self.disc_optimizer.step()
+        self.disc_scheduler.step()
+
+        return disc_loss.detach()
+
+    def _generator_adversarial_terms(
+        self,
+        reconstruction: torch.Tensor,
+        target: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Adversarial + feature-matching terms for the generator update."""
+        with autocast(dtype=None, enabled=False):
+            logits_fake, features_fake = self.discriminator(reconstruction.float())
+            with torch.no_grad():
+                _, features_real = self.discriminator(target.detach().float())
+
+            return {
+                "adv_loss": generator_adversarial_loss(logits_fake),
+                "feat_loss": feature_matching_loss(features_real, features_fake),
+            }
 
     @staticmethod
     def _scalar_metrics(
@@ -407,6 +534,23 @@ class SynthGenTrainer:
                     if config.stage == "vae":
                         reconstruction, target, mean, log_var = self.model(audio)
                         losses = self.loss_fn(reconstruction, target, mean, log_var)
+
+                        if self.adversarial_active:
+                            # Critic first, on a detached reconstruction, so the
+                            # generator is scored against an up-to-date critic.
+                            if self.global_step % config.disc_update_every == 0:
+                                losses["disc_loss"] = self._discriminator_step(
+                                    reconstruction, target
+                                )
+                            adv_terms = self._generator_adversarial_terms(
+                                reconstruction, target
+                            )
+                            losses.update(adv_terms)
+                            losses["loss"] = (
+                                losses["loss"]
+                                + config.adv_weight * adv_terms["adv_loss"]
+                                + config.feature_matching_weight * adv_terms["feat_loss"]
+                            )
                     else:
                         # DDP does not forward custom methods; unwrap when needed
                         model = (
@@ -512,6 +656,16 @@ class SynthGenTrainer:
         if self.scaler:
             checkpoint["scaler_state_dict"] = self.scaler.state_dict()
 
+        if self.discriminator is not None:
+            disc = (
+                self.discriminator.module
+                if isinstance(self.discriminator, DDP)
+                else self.discriminator
+            )
+            checkpoint["discriminator_state_dict"] = disc.state_dict()
+            checkpoint["disc_optimizer_state_dict"] = self.disc_optimizer.state_dict()
+            checkpoint["disc_scheduler_state_dict"] = self.disc_scheduler.state_dict()
+
         torch.save(checkpoint, checkpoint_path)
         logger.info(f"Saved checkpoint: {checkpoint_path}")
         self.tracker.log_checkpoint_ref(str(checkpoint_path), step=self.global_step)
@@ -541,6 +695,29 @@ class SynthGenTrainer:
 
         if self.scaler and "scaler_state_dict" in checkpoint:
             self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+
+        if self.discriminator is not None:
+            if "discriminator_state_dict" in checkpoint:
+                disc = (
+                    self.discriminator.module
+                    if isinstance(self.discriminator, DDP)
+                    else self.discriminator
+                )
+                disc.load_state_dict(checkpoint["discriminator_state_dict"])
+                self.disc_optimizer.load_state_dict(
+                    checkpoint["disc_optimizer_state_dict"]
+                )
+                self.disc_scheduler.load_state_dict(
+                    checkpoint["disc_scheduler_state_dict"]
+                )
+            else:
+                # Resuming a pre-adversarial run: the critic starts from scratch,
+                # so give it the same warm-up it would have had from step 0.
+                logger.warning(
+                    "Checkpoint has no discriminator state; the critic will train "
+                    "from random init once step %d is reached.",
+                    self.config.disc_start_step,
+                )
 
         logger.info(f"Resumed from step {self.global_step}")
 

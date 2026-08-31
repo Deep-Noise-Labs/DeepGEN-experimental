@@ -43,14 +43,21 @@ Before beginning the training process, you must acquire and prepare the datasets
 
 The first stage involves training the Audio VAE to compress raw audio waveforms into a compact latent space. This step is critical, as the quality of the VAE dictates the maximum possible audio quality of the final generation.
 
-The VAE compresses 44.1 kHz stereo audio by a factor of 2048x, mapping it to a 64-dimensional latent space. It is trained using a combination of L1 reconstruction loss, Multi-resolution STFT loss, and KL divergence loss.
+The VAE compresses 44.1 kHz stereo audio by a factor of 1024x, mapping it to a 64-dimensional latent space. It is trained with L1 reconstruction loss, multi-resolution STFT loss, a perceptual multi-resolution mel loss, KL divergence, and an adversarial term from a multi-period + complex-STFT critic bank.
+
+**Read [VAE_FIDELITY.md](VAE_FIDELITY.md) before running a quality run.** It covers what each of those terms buys, why the reconstruction-only objective cannot reach a commercial quality bar on its own, and the checkpoint-compatibility break introduced by the anti-aliased decoder.
 
 ### Configuration
 
 Ready-made AudioCaps validation configs live in the repo:
 
-- [`configs/vae_audiocaps.yaml`](../configs/vae_audiocaps.yaml) — Stage 1 (short budget)
+- [`configs/vae_gan.yaml`](../configs/vae_gan.yaml) — Stage 1 **quality run** (anti-aliased decoder + mel loss + adversarial)
+- [`configs/vae_audiocaps.yaml`](../configs/vae_audiocaps.yaml) — Stage 1 (short pipeline-validation budget, adversarial off)
 - [`configs/dit_audiocaps.yaml`](../configs/dit_audiocaps.yaml) — Stage 2 (loads `vae_checkpoint`)
+
+Stage 2 must construct the VAE with the same `vae_activation` and
+`vae_anti_aliased_decoder` as the Stage-1 checkpoint it loads, or the weights
+will not match.
 
 ### Execution
 
@@ -64,11 +71,15 @@ uv run synthgen-train --config configs/vae_audiocaps.yaml --max-samples 64 --max
 # Multi-GPU AudioCaps VAE — only rank 0 reports to ClearML
 uv run torchrun --nproc_per_node=4 -m synthgen.training.trainer \
   --config configs/vae_audiocaps.yaml --clearml
+
+# Quality run with the adversarial fidelity stack
+uv run torchrun --nproc_per_node=4 -m synthgen.training.trainer \
+  --config configs/vae_gan.yaml --clearml
 ```
 
 ### Evaluation
 
-Monitor training metrics in ClearML (see [CLEARML.md](CLEARML.md)). The key metric to watch is `spectral_loss`. Once the loss plateaus (typically around 300k-500k steps), the VAE is ready. You can test the reconstruction quality by encoding and decoding test audio files.
+Monitor training metrics in ClearML (see [CLEARML.md](CLEARML.md)). The key metric to watch is `mel_loss` — it is the one weighted the way the ear is; `spectral_loss` can keep falling while the output gets no better to listen to. Once past `disc_start_step`, also watch `disc_loss` (pinned near 0 means the critic has won and the generator is getting no usable gradient) and `feat_loss`. Once the loss plateaus (typically around 300k-500k steps), the VAE is ready. You can test the reconstruction quality by encoding and decoding test audio files.
 
 ## Stage 2: Training the Diffusion Transformer (DiT)
 

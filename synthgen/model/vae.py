@@ -6,8 +6,15 @@ diffusion-based generation. Architecture inspired by Stable Audio's
 autoencoder with Snake activations and strided convolutions.
 
 The encoder maps stereo 44.1kHz audio to continuous latents with a
-compression ratio of 2048x (e.g., 10s stereo audio = 882,000 samples
-per channel → 431 latent frames of dimension 64).
+compression ratio of 1024x (e.g., 10s stereo audio = 441,000 samples
+per channel → 430 latent frames of dimension 64).
+
+The decoder runs every nonlinearity through an anti-aliasing sandwich
+(see ``synthgen.model.activations``). A pointwise Snake applied directly on
+the sample grid folds its own harmonics back into the audible band as
+inharmonic partials; on sustained tonal material -- the material this model
+exists to generate -- that reads as metallic grit and cannot be trained away.
+Set ``anti_aliased=False`` to restore the pre-0.2 behaviour.
 """
 
 import math
@@ -17,28 +24,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from synthgen.model.activations import Snake, SnakeBeta, build_activation
 
-# =============================================================================
-# Activation Functions
-# =============================================================================
-
-
-class Snake(nn.Module):
-    """
-    Snake activation function: x + (1/alpha) * sin^2(alpha * x).
-
-    Provides periodic inductive bias that is beneficial for audio synthesis,
-    as shown in BigVGAN and Stable Audio.
-    """
-
-    def __init__(self, channels: int, alpha_init: float = 1.0):
-        super().__init__()
-        self.alpha = nn.Parameter(
-            torch.full((1, channels, 1), alpha_init)
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + (1.0 / (self.alpha + 1e-8)) * torch.sin(self.alpha * x) ** 2
+__all__ = [
+    "Snake",
+    "SnakeBeta",
+    "ResidualBlock",
+    "EncoderBlock",
+    "DecoderBlock",
+    "AudioEncoder",
+    "AudioDecoder",
+    "AudioVAE",
+]
 
 
 # =============================================================================
@@ -54,19 +51,21 @@ class ResidualBlock(nn.Module):
         channels: int,
         dilation: int = 1,
         kernel_size: int = 7,
+        activation: str = "snakebeta",
+        anti_aliased: bool = False,
     ):
         super().__init__()
         padding = (kernel_size - 1) * dilation // 2
 
         self.block = nn.Sequential(
-            Snake(channels),
+            build_activation(channels, activation, anti_aliased),
             nn.Conv1d(
                 channels, channels,
                 kernel_size=kernel_size,
                 dilation=dilation,
                 padding=padding,
             ),
-            Snake(channels),
+            build_activation(channels, activation, anti_aliased),
             nn.Conv1d(channels, channels, kernel_size=1),
         )
 
@@ -88,18 +87,25 @@ class EncoderBlock(nn.Module):
         stride: int = 4,
         num_residual: int = 3,
         dilations: tuple = (1, 3, 9),
+        activation: str = "snakebeta",
+        anti_aliased: bool = False,
     ):
         super().__init__()
 
         # Residual layers with increasing dilation
         self.residual_layers = nn.Sequential(*[
-            ResidualBlock(in_channels, dilation=d)
+            ResidualBlock(
+                in_channels,
+                dilation=d,
+                activation=activation,
+                anti_aliased=anti_aliased,
+            )
             for d in dilations[:num_residual]
         ])
 
         # Downsampling via strided convolution
         self.downsample = nn.Sequential(
-            Snake(in_channels),
+            build_activation(in_channels, activation, anti_aliased),
             nn.Conv1d(
                 in_channels, out_channels,
                 kernel_size=stride * 2,
@@ -125,12 +131,14 @@ class DecoderBlock(nn.Module):
         stride: int = 4,
         num_residual: int = 3,
         dilations: tuple = (1, 3, 9),
+        activation: str = "snakebeta",
+        anti_aliased: bool = True,
     ):
         super().__init__()
 
         # Upsampling via transposed convolution
         self.upsample = nn.Sequential(
-            Snake(in_channels),
+            build_activation(in_channels, activation, anti_aliased),
             nn.ConvTranspose1d(
                 in_channels, out_channels,
                 kernel_size=stride * 2,
@@ -142,7 +150,12 @@ class DecoderBlock(nn.Module):
 
         # Residual layers
         self.residual_layers = nn.Sequential(*[
-            ResidualBlock(out_channels, dilation=d)
+            ResidualBlock(
+                out_channels,
+                dilation=d,
+                activation=activation,
+                anti_aliased=anti_aliased,
+            )
             for d in dilations[:num_residual]
         ])
 
@@ -176,6 +189,8 @@ class AudioEncoder(nn.Module):
         channel_multipliers: tuple = (1, 2, 4, 8),
         strides: tuple = (4, 4, 8, 8),
         num_residual_per_block: int = 3,
+        activation: str = "snakebeta",
+        anti_aliased: bool = False,
     ):
         super().__init__()
 
@@ -203,15 +218,27 @@ class AudioEncoder(nn.Module):
                     out_channels=out_channels,
                     stride=stride,
                     num_residual=num_residual_per_block,
+                    activation=activation,
+                    anti_aliased=anti_aliased,
                 )
             )
             current_channels = out_channels
 
         # Bottleneck
         self.bottleneck = nn.Sequential(
-            ResidualBlock(current_channels, dilation=1),
-            ResidualBlock(current_channels, dilation=3),
-            Snake(current_channels),
+            ResidualBlock(
+                current_channels,
+                dilation=1,
+                activation=activation,
+                anti_aliased=anti_aliased,
+            ),
+            ResidualBlock(
+                current_channels,
+                dilation=3,
+                activation=activation,
+                anti_aliased=anti_aliased,
+            ),
+            build_activation(current_channels, activation, anti_aliased),
         )
 
         # Output projection to latent space (mean and log-var)
@@ -260,6 +287,8 @@ class AudioDecoder(nn.Module):
         channel_multipliers: tuple = (8, 4, 2, 1),
         strides: tuple = (8, 8, 4, 4),
         num_residual_per_block: int = 3,
+        activation: str = "snakebeta",
+        anti_aliased: bool = True,
     ):
         super().__init__()
 
@@ -272,8 +301,18 @@ class AudioDecoder(nn.Module):
 
         # Pre-bottleneck
         self.bottleneck = nn.Sequential(
-            ResidualBlock(first_channels, dilation=1),
-            ResidualBlock(first_channels, dilation=3),
+            ResidualBlock(
+                first_channels,
+                dilation=1,
+                activation=activation,
+                anti_aliased=anti_aliased,
+            ),
+            ResidualBlock(
+                first_channels,
+                dilation=3,
+                activation=activation,
+                anti_aliased=anti_aliased,
+            ),
         )
 
         # Decoder blocks
@@ -293,13 +332,15 @@ class AudioDecoder(nn.Module):
                     out_channels=out_ch,
                     stride=stride,
                     num_residual=num_residual_per_block,
+                    activation=activation,
+                    anti_aliased=anti_aliased,
                 )
             )
             current_channels = out_ch
 
         # Output projection (no tanh to avoid harmonic distortion)
         self.output_conv = nn.Sequential(
-            Snake(current_channels),
+            build_activation(current_channels, activation, anti_aliased),
             nn.Conv1d(current_channels, out_channels, kernel_size=7, padding=3),
         )
         self.output_conv[1] = nn.utils.parametrizations.weight_norm(self.output_conv[1])
@@ -335,6 +376,18 @@ class AudioVAE(nn.Module):
 
     Combines encoder and decoder with reparameterization trick for
     training with the VAE objective (reconstruction + KL divergence).
+
+    Args:
+        activation: ``"snakebeta"`` (default) or ``"snake"``. ``"snake"`` restores
+            the pre-0.2 parameterisation and is what Stage-1 checkpoints trained
+            before this change contain.
+        anti_aliased_decoder: Wrap every decoder nonlinearity in the 2x
+            oversampling anti-aliasing sandwich. This is the setting that decides
+            whether the decoder can emit clean tonal material; leave it on unless
+            you are reproducing an old run.
+        anti_aliased_encoder: Same for the encoder. Off by default -- the encoder
+            feeds a learned latent rather than a loudspeaker, so the extra
+            compute buys much less there.
     """
 
     def __init__(
@@ -346,6 +399,9 @@ class AudioVAE(nn.Module):
         decoder_channel_multipliers: tuple = (8, 4, 2, 1),
         strides: tuple = (4, 4, 8, 8),
         num_residual_per_block: int = 3,
+        activation: str = "snakebeta",
+        anti_aliased_decoder: bool = True,
+        anti_aliased_encoder: bool = False,
     ):
         super().__init__()
 
@@ -361,6 +417,8 @@ class AudioVAE(nn.Module):
             channel_multipliers=encoder_channel_multipliers,
             strides=strides,
             num_residual_per_block=num_residual_per_block,
+            activation=activation,
+            anti_aliased=anti_aliased_encoder,
         )
 
         self.decoder = AudioDecoder(
@@ -370,6 +428,8 @@ class AudioVAE(nn.Module):
             channel_multipliers=decoder_channel_multipliers,
             strides=tuple(reversed(strides)),
             num_residual_per_block=num_residual_per_block,
+            activation=activation,
+            anti_aliased=anti_aliased_decoder,
         )
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
