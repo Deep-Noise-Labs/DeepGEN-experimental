@@ -2,7 +2,7 @@
 Loss functions for SynthGen training.
 
 Includes losses for:
-- VAE training (reconstruction + KL + spectral + adversarial)
+- VAE training (reconstruction + KL + spectral + mel + adversarial)
 - DiT training (flow matching velocity MSE)
 """
 
@@ -12,6 +12,16 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+__all__ = [
+    "MultiResolutionSTFTLoss",
+    "MultiResolutionMelLoss",
+    "VAELoss",
+    "feature_matching_loss",
+    "generator_adversarial_loss",
+    "discriminator_adversarial_loss",
+    "FlowMatchingLoss",
+]
 
 
 # =============================================================================
@@ -95,14 +105,159 @@ class MultiResolutionSTFTLoss(nn.Module):
         return total_loss / len(self.fft_sizes)
 
 
+def hz_to_mel(hz: torch.Tensor) -> torch.Tensor:
+    """HTK mel scale."""
+    return 2595.0 * torch.log10(1.0 + hz / 700.0)
+
+
+def mel_to_hz(mel: torch.Tensor) -> torch.Tensor:
+    """Inverse of :func:`hz_to_mel`."""
+    return 700.0 * (10.0 ** (mel / 2595.0) - 1.0)
+
+
+def mel_filterbank(
+    sample_rate: int,
+    n_fft: int,
+    n_mels: int,
+    fmin: float = 0.0,
+    fmax: float | None = None,
+) -> torch.Tensor:
+    """
+    Triangular mel filterbank of shape ``(n_mels, n_fft // 2 + 1)``.
+
+    Implemented in torch rather than pulled from librosa so the loss is a pure
+    tensor op that lives on whatever device the training step is on.
+    """
+    fmax = sample_rate / 2.0 if fmax is None else fmax
+    fft_freqs = torch.linspace(0.0, sample_rate / 2.0, n_fft // 2 + 1)
+
+    mel_points = torch.linspace(
+        hz_to_mel(torch.tensor(fmin)).item(),
+        hz_to_mel(torch.tensor(fmax)).item(),
+        n_mels + 2,
+    )
+    hz_points = mel_to_hz(mel_points)
+
+    # Slopes of each triangle against every FFT bin centre.
+    diff = hz_points[1:] - hz_points[:-1]
+    ramps = hz_points.unsqueeze(1) - fft_freqs.unsqueeze(0)  # (n_mels + 2, n_bins)
+
+    lower = -ramps[:-2] / diff[:-1].unsqueeze(1)
+    upper = ramps[2:] / diff[1:].unsqueeze(1)
+    weights = torch.clamp(torch.minimum(lower, upper), min=0.0)
+
+    # Slaney-style area normalisation: equal energy per band, not equal peak.
+    enorm = 2.0 / (hz_points[2:] - hz_points[:-2])
+    return weights * enorm.unsqueeze(1)
+
+
+class MultiResolutionMelLoss(nn.Module):
+    """
+    L1 on log-mel spectrograms at several time/frequency resolutions.
+
+    Why this and not just :class:`MultiResolutionSTFTLoss`: a linear-frequency
+    STFT L1 spends its capacity in proportion to bin count, and half of a
+    linear spectrum's bins sit in the top octave (11--22 kHz) where the ear has
+    almost no frequency resolution and very little sensitivity. Meanwhile the
+    2--3 bins covering 20--200 Hz -- where the fundamental of a bass patch or a
+    piano's bottom register lives -- contribute almost nothing to the gradient.
+    A mel-spaced criterion redistributes that weight to match human hearing,
+    which is what "sounds right" actually means.
+
+    The short windows (64--256 samples) resolve transients -- the attack of a
+    pluck, the click of a percussive hit -- which a 2048-sample window smears
+    across 46 ms. The long windows resolve steady-state partials. Both matter
+    for sample-library material; neither alone is sufficient.
+
+    Defaults follow the Descript Audio Codec recipe, trimmed to five
+    resolutions to keep the step cost reasonable at 44.1 kHz.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int = 44100,
+        window_sizes: tuple[int, ...] = (2048, 1024, 512, 128, 64),
+        n_mels: tuple[int, ...] = (320, 160, 80, 20, 10),
+        # 20 Hz floor: below the audible band, and it keeps DC offset and
+        # sub-audio rumble from taking gradient away from things you can hear.
+        fmin: float = 20.0,
+        fmax: float | None = None,
+        log_weight: float = 1.0,
+        mag_weight: float = 1.0,
+        eps: float = 1e-5,
+    ):
+        super().__init__()
+        if len(window_sizes) != len(n_mels):
+            raise ValueError("window_sizes and n_mels must be the same length")
+
+        self.window_sizes = window_sizes
+        self.hop_sizes = tuple(w // 4 for w in window_sizes)
+        self.log_weight = log_weight
+        self.mag_weight = mag_weight
+        self.eps = eps
+
+        for i, (win, mels) in enumerate(zip(window_sizes, n_mels)):
+            self.register_buffer(
+                f"fb_{i}",
+                mel_filterbank(sample_rate, win, mels, fmin=fmin, fmax=fmax),
+                persistent=False,
+            )
+            self.register_buffer(
+                f"window_{i}", torch.hann_window(win), persistent=False
+            )
+
+    def _log_mel(self, x: torch.Tensor, index: int) -> torch.Tensor:
+        win = self.window_sizes[index]
+        spec = torch.stft(
+            x,
+            n_fft=win,
+            hop_length=self.hop_sizes[index],
+            win_length=win,
+            window=getattr(self, f"window_{index}").to(x.device, x.dtype),
+            return_complex=True,
+            center=True,
+            pad_mode="reflect",
+        ).abs()
+        fb = getattr(self, f"fb_{index}").to(x.device, x.dtype)
+        return fb @ spec
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        if pred.dim() == 3:
+            batch, channels, samples = pred.shape
+            pred = pred.reshape(batch * channels, samples)
+            target = target.reshape(batch * channels, samples)
+
+        # STFT in fp32 regardless of the autocast context.
+        with torch.autocast(device_type=pred.device.type, enabled=False):
+            pred = pred.float()
+            target = target.float()
+
+            total = pred.new_zeros(())
+            for i in range(len(self.window_sizes)):
+                pred_mel = self._log_mel(pred, i)
+                target_mel = self._log_mel(target, i)
+                total = total + self.mag_weight * F.l1_loss(pred_mel, target_mel)
+                total = total + self.log_weight * F.l1_loss(
+                    torch.log(pred_mel.clamp(min=self.eps)),
+                    torch.log(target_mel.clamp(min=self.eps)),
+                )
+
+        return total / len(self.window_sizes)
+
+
 class VAELoss(nn.Module):
     """
-    Combined VAE loss for audio autoencoder training.
+    Reconstruction + KL objective for the audio autoencoder.
 
     Components:
-    - Reconstruction loss (L1 + multi-resolution STFT)
-    - KL divergence loss
-    - Optional adversarial loss
+    - L1 on the waveform
+    - Multi-resolution STFT (linear frequency)
+    - Multi-resolution mel (perceptual frequency weighting)
+    - KL divergence
+
+    The adversarial and feature-matching terms live in
+    :func:`generator_adversarial_loss` / :func:`feature_matching_loss` and are
+    combined by the trainer, which owns the discriminator and its optimiser.
     """
 
     def __init__(
@@ -111,14 +266,20 @@ class VAELoss(nn.Module):
         kl_weight: float = 1e-4,
         spectral_weight: float = 1.0,
         l1_weight: float = 0.1,
+        mel_weight: float = 1.0,
+        sample_rate: int = 44100,
     ):
         super().__init__()
         self.recon_weight = recon_weight
         self.kl_weight = kl_weight
         self.spectral_weight = spectral_weight
         self.l1_weight = l1_weight
+        self.mel_weight = mel_weight
 
         self.spectral_loss = MultiResolutionSTFTLoss()
+        self.mel_loss = (
+            MultiResolutionMelLoss(sample_rate=sample_rate) if mel_weight > 0 else None
+        )
 
     def forward(
         self,
@@ -157,12 +318,80 @@ class VAELoss(nn.Module):
             + self.kl_weight * kl_loss
         )
 
-        return {
+        losses = {
             "loss": total_loss,
             "l1_loss": l1_loss,
             "spectral_loss": spectral_loss,
             "kl_loss": kl_loss,
         }
+
+        if self.mel_loss is not None:
+            mel_loss = self.mel_loss(reconstruction, target)
+            losses["mel_loss"] = mel_loss
+            losses["loss"] = total_loss + self.mel_weight * mel_loss
+
+        return losses
+
+
+# =============================================================================
+# Adversarial losses
+# =============================================================================
+
+
+def feature_matching_loss(
+    features_real: list[list[torch.Tensor]],
+    features_fake: list[list[torch.Tensor]],
+) -> torch.Tensor:
+    """
+    L1 between the discriminator's intermediate activations on real vs fake.
+
+    This is what keeps adversarial autoencoder training stable: it gives the
+    generator a dense, well-conditioned signal ("match what the critic notices")
+    instead of only the single scalar of the adversarial term, which on its own
+    is happy to be satisfied by artefacts that fool the critic without
+    resembling the target.
+    """
+    total = None
+    count = 0
+    for real_stack, fake_stack in zip(features_real, features_fake):
+        for real, fake in zip(real_stack, fake_stack):
+            term = F.l1_loss(fake, real.detach())
+            total = term if total is None else total + term
+            count += 1
+    if total is None:
+        raise ValueError("feature_matching_loss received no features")
+    return total / count
+
+
+def generator_adversarial_loss(logits_fake: list[torch.Tensor]) -> torch.Tensor:
+    """
+    Hinge generator loss: ``mean(-D(fake))`` over every sub-discriminator.
+
+    Hinge rather than least-squares: it saturates once the generator has
+    convinced a given critic, so gradient budget moves to the critics that are
+    still winning instead of being spent pushing an already-won logit higher.
+    """
+    total = None
+    for logit in logits_fake:
+        term = -logit.mean()
+        total = term if total is None else total + term
+    if total is None:
+        raise ValueError("generator_adversarial_loss received no logits")
+    return total / len(logits_fake)
+
+
+def discriminator_adversarial_loss(
+    logits_real: list[torch.Tensor],
+    logits_fake: list[torch.Tensor],
+) -> torch.Tensor:
+    """Hinge discriminator loss: ``mean(relu(1 - D(real)) + relu(1 + D(fake)))``."""
+    total = None
+    for real, fake in zip(logits_real, logits_fake):
+        term = F.relu(1.0 - real).mean() + F.relu(1.0 + fake).mean()
+        total = term if total is None else total + term
+    if total is None:
+        raise ValueError("discriminator_adversarial_loss received no logits")
+    return total / len(logits_real)
 
 
 # =============================================================================

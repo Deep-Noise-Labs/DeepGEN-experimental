@@ -1,0 +1,76 @@
+# Stage-1 VAE with the full fidelity stack:
+#   anti-aliased SnakeBeta decoder + perceptual mel loss + adversarial training.
+#
+# This is the config that decides the ceiling on everything downstream. The DiT
+# can only ever be as good as what the decoder can render, so it is worth
+# spending real compute here before touching Stage 2.
+stage: "vae"
+
+# --- Architecture ------------------------------------------------------------
+vae_latent_dim: 64
+vae_activation: "snakebeta"
+# Anti-aliasing on the decoder is the setting that keeps a sustained tonal
+# source from acquiring inharmonic grit. Turning it off reproduces pre-0.2 runs.
+vae_anti_aliased_decoder: true
+# The encoder feeds a learned latent rather than a loudspeaker, so the extra
+# 2x compute buys much less there. Off unless you have budget to spare.
+vae_anti_aliased_encoder: false
+
+sample_rate: 44100
+audio_channels: 2
+# Short windows: adversarial training is memory-hungry and the critics care
+# about local structure, not long-form arrangement. 15s clips are for Stage 2.
+max_duration: 5.0
+
+# --- Optimisation ------------------------------------------------------------
+batch_size: 4
+gradient_accumulation_steps: 4
+learning_rate: 1.0e-4
+weight_decay: 0.01
+max_steps: 400000
+warmup_steps: 2000
+min_lr: 1.0e-6
+mixed_precision: "bf16"
+
+# --- Objective ---------------------------------------------------------------
+# Mel dominates the reconstruction terms: it is the one that is weighted the way
+# the ear is. The linear STFT and waveform L1 stay in as anchors.
+mel_weight: 15.0
+
+# --- Adversarial -------------------------------------------------------------
+vae_adversarial: true
+# Reconstruction-only warm-up. Introducing critics against a randomly
+# initialised decoder just teaches them to detect noise; wait until the
+# autoencoder is producing something recognisable.
+disc_start_step: 20000
+disc_learning_rate: 1.0e-4
+disc_update_every: 1
+adv_weight: 1.0
+# Feature matching carries more weight than the adversarial term itself: it is
+# the dense, well-conditioned half of the signal and it is what keeps the run
+# from diverging.
+feature_matching_weight: 2.0
+disc_periods: [2, 3, 5, 7, 11]
+disc_fft_sizes: [2048, 1024, 512]
+disc_hop_sizes: [512, 256, 128]
+
+# --- Checkpointing / logging -------------------------------------------------
+checkpoint_dir: "./checkpoints/vae_gan"
+save_every_steps: 5000
+resume_from: null
+
+log_every_steps: 50
+eval_every_steps: 2500
+use_clearml: false
+clearml_project: "synthgen-vae"
+clearml_task_name: "vae-gan"
+clearml_tags: ["vae", "gan", "anti-aliased"]
+clearml_dataset_name: "synthgen-data"
+clearml_register_dataset: false
+clearml_upload_checkpoints: false
+use_wandb: false
+wandb_project: "synthgen"
+
+data_dir: "./data"
+num_workers: 4
+max_samples: null

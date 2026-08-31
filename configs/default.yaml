@@ -52,3 +52,20 @@ num_workers: 8
 
 # Classifier-Free Guidance
 cfg_dropout_prob: 0.1
+
+# VAE architecture (Stage 1)
+vae_activation: "snakebeta"       # "snakebeta" or "snake" (pre-0.2 checkpoints)
+vae_anti_aliased_decoder: true
+vae_anti_aliased_encoder: false
+
+# VAE objective / adversarial training (Stage 1 only)
+mel_weight: 15.0
+vae_adversarial: true
+disc_start_step: 20000
+disc_learning_rate: 1.0e-4
+disc_update_every: 1
+adv_weight: 1.0
+feature_matching_weight: 2.0
+disc_periods: [2, 3, 5, 7, 11]
+disc_fft_sizes: [2048, 1024, 512]
+disc_hop_sizes: [512, 256, 128]

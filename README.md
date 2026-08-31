@@ -8,7 +8,7 @@ SynthGen employs a **Latent Diffusion Transformer (DiT)** architecture with **Co
 
 | Component | Description | Parameters |
 |-----------|-------------|------------|
-| **Audio VAE** | Variational autoencoder that compresses raw waveforms into a compact latent space | ~80M |
+| **Audio VAE** | Variational autoencoder that compresses raw waveforms into a compact latent space | ~18M |
 | **Text Encoder** | Frozen T5-base encoder that produces text conditioning embeddings | ~110M |
 | **DiT (Flow Matching)** | Transformer-based generative model operating in latent space | ~350M |
 
@@ -26,8 +26,12 @@ The architecture draws from state-of-the-art research in text-to-audio generatio
 
 **Why T5-base?** T5-base provides a strong text understanding backbone that has been validated across multiple audio generation systems (Stable Audio, AudioLDM). It balances quality with computational efficiency.
 
+**Why the decoder is where the quality lives.** Everything the model emits passes through the VAE decoder, so the decoder sets a hard ceiling on the whole system: a perfect latent still comes out sounding like whatever that decoder can render. Stage 1 therefore trains with anti-aliased nonlinearities, a perceptual mel objective, and a multi-period + complex-STFT critic bank. [`docs/VAE_FIDELITY.md`](docs/VAE_FIDELITY.md) explains what each buys and what it costs.
+
 ## Key Features
 
+- Anti-aliased decoder: nonlinearities run oversampled so they cannot fold inharmonic partials back into the audible band
+- Adversarial Stage-1 training with multi-period and complex-STFT critics
 - Text-conditioned generation of short audio samples (3–15 seconds)
 - 44.1 kHz stereo output for production-quality audio
 - Support for both synthetic and acoustic instrument timbres
@@ -41,6 +45,7 @@ The architecture draws from state-of-the-art research in text-to-audio generatio
 synthgen-experimental/
 ├── synthgen/
 │   ├── model/           # Neural network architecture
+│   │   ├── activations.py   # Anti-aliased Snake / SnakeBeta
 │   │   ├── vae.py       # Audio VAE (encoder + decoder)
 │   │   ├── dit.py       # Diffusion Transformer
 │   │   ├── text_encoder.py  # T5-based text conditioning
@@ -51,7 +56,8 @@ synthgen-experimental/
 │   │   └── preprocessing.py  # Audio preprocessing
 │   ├── training/        # Training logic
 │   │   ├── trainer.py   # Training loop
-│   │   ├── losses.py    # Loss functions
+│   │   ├── losses.py    # Loss functions (recon + mel + adversarial)
+│   │   ├── discriminators.py  # Multi-period + complex-STFT critics
 │   │   └── scheduler.py # Learning rate schedulers
 │   ├── inference/       # Inference utilities
 │   │   └── generate.py  # Generation pipeline
@@ -61,6 +67,7 @@ synthgen-experimental/
 ├── tests/               # Unit and integration tests
 ├── docs/                # Documentation
 │   ├── TRAINING.md      # Training guidelines
+│   ├── VAE_FIDELITY.md  # Stage-1 audio quality: what sets the ceiling
 │   ├── CLEARML.md       # ClearML setup and upload policy
 │   └── TRITON_INFERENCE.md  # Triton deployment guide
 ├── configs/             # Configuration files
@@ -129,3 +136,7 @@ This project is released under the MIT License. Individual datasets may have the
 - [FlashAudio](https://arxiv.org/abs/2410.12266) — Rectified flows for text-to-audio
 - [AudioLDM 2](https://arxiv.org/abs/2308.05734) — Holistic audio generation framework
 - [MusicGen](https://arxiv.org/abs/2306.05284) — Autoregressive music generation
+- [BigVGAN](https://arxiv.org/abs/2206.04658) — Anti-aliased periodic activations for neural vocoding
+- [Alias-Free GAN](https://arxiv.org/abs/2106.12423) — The alias-free formulation the above builds on
+- [Descript Audio Codec](https://arxiv.org/abs/2306.06546) — Multi-resolution mel loss and complex-STFT critics
+- [HiFi-GAN](https://arxiv.org/abs/2010.05646) — Multi-period discriminator
