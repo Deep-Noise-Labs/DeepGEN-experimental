@@ -164,7 +164,13 @@ def log_spectrum(
     out: list[float] = []
     for low, high in zip(edges[:-1], edges[1:]):
         mask = (freqs >= low) & (freqs < high)
-        value = mean[mask].max() if mask.any() else torch.tensor(1e-10)
+        if mask.any():
+            value = mean[mask].max()
+        else:
+            # At the bottom of a log axis a band can be narrower than the FFT's
+            # bin spacing. Fall back to the nearest bin rather than a hole.
+            centre = (low * high).sqrt()
+            value = mean[int(torch.argmin((freqs - centre).abs()))]
         out.append(round(20 * math.log10(float(value) + 1e-10), 2))
     return out
 
