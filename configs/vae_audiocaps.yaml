@@ -35,3 +35,16 @@ wandb_project: "synthgen"
 data_dir: "./data/audiocaps"
 num_workers: 4
 max_samples: null
+
+# Sample-grade preprocessing (synthgen/data/preprocessing.py)
+# Loudness target and true-peak ceiling follow commercial one-shot conventions.
+target_rms_db: -20.0
+peak_ceiling_db: -1.0
+silence_floor_db: -60.0
+onset_threshold_db: -35.0
+onset_pre_roll_ms: 10.0
+# Fraction of crops from long sources anchored to the attack; the rest stay random.
+onset_anchor_prob: 0.5
+# Attenuation-only: applied after normalisation it cannot breach the ceiling.
+gain_db_range: [-6.0, 0.0]
+trim_silence: true

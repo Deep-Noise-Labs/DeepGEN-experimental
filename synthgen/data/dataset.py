@@ -22,7 +22,16 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from synthgen.data.preprocessing import pad_or_crop, peak_normalize, random_gain
+from synthgen.data.preprocessing import (
+    DEFAULT_ONSET_ANCHOR_PROB,
+    DEFAULT_ONSET_THRESHOLD_DB,
+    DEFAULT_PEAK_CEILING_DB,
+    DEFAULT_SILENCE_FLOOR_DB,
+    DEFAULT_TARGET_RMS_DB,
+    prepare_sample,
+    remove_dc_offset,
+)
+from synthgen.data.preprocessing import trim_silence as _trim_silence
 from synthgen.utils.audio import load_audio
 
 logger = logging.getLogger(__name__)
@@ -70,6 +79,14 @@ class AudioTextDataset(Dataset):
         channels: int = 2,
         augment: bool = True,
         max_samples: int | None = None,
+        target_rms_db: float = DEFAULT_TARGET_RMS_DB,
+        peak_ceiling_db: float = DEFAULT_PEAK_CEILING_DB,
+        silence_floor_db: float = DEFAULT_SILENCE_FLOOR_DB,
+        onset_threshold_db: float = DEFAULT_ONSET_THRESHOLD_DB,
+        onset_pre_roll_ms: float = 10.0,
+        onset_anchor_prob: float = DEFAULT_ONSET_ANCHOR_PROB,
+        gain_db_range: tuple[float, float] = (-6.0, 0.0),
+        trim_silence: bool = True,
     ):
         self.dataset_root = resolve_dataset_root(Path(data_dir))
         self.sample_rate = sample_rate
@@ -77,6 +94,14 @@ class AudioTextDataset(Dataset):
         self.channels = channels
         self.augment = augment
         self.target_samples = int(sample_rate * duration)
+        self.target_rms_db = target_rms_db
+        self.peak_ceiling_db = peak_ceiling_db
+        self.silence_floor_db = silence_floor_db
+        self.onset_threshold_db = onset_threshold_db
+        self.onset_pre_roll_ms = onset_pre_roll_ms
+        self.onset_anchor_prob = onset_anchor_prob
+        self.gain_db_range = tuple(gain_db_range)
+        self.trim_silence = trim_silence
         self.records = load_metadata(self.dataset_root, max_samples=max_samples)
         logger.info(
             "AudioTextDataset: %d clips from %s",
@@ -95,17 +120,40 @@ class AudioTextDataset(Dataset):
             sample_rate=self.sample_rate,
             channels=self.channels,
         )
-        original_duration = audio.shape[-1] / float(self.sample_rate)
-        audio = pad_or_crop(audio, self.target_samples)
-        audio = peak_normalize(audio)
-        if self.augment:
-            audio = random_gain(audio)
-            audio = np.clip(audio, -1.0, 1.0)
+
+        # Derive augmentation randomness from the worker seed rather than the
+        # global numpy state. DataLoader seeds torch per worker but not numpy,
+        # so a global-state pipeline hands every worker the same gain sequence.
+        rng = np.random.default_rng((torch.initial_seed() + index) % (2**32))
+
+        # Trim before measuring, so the duration conditioning describes the
+        # sounding content and not whatever silence the source file carried.
+        audio = remove_dc_offset(audio)
+        if self.trim_silence:
+            audio = _trim_silence(
+                audio, self.sample_rate, floor_db=self.silence_floor_db
+            )
+        content_duration = audio.shape[-1] / float(self.sample_rate)
+
+        audio = prepare_sample(
+            audio,
+            sample_rate=self.sample_rate,
+            target_samples=self.target_samples,
+            augment=self.augment,
+            target_rms_db=self.target_rms_db,
+            peak_ceiling_db=self.peak_ceiling_db,
+            onset_threshold_db=self.onset_threshold_db,
+            onset_pre_roll_ms=self.onset_pre_roll_ms,
+            onset_anchor_prob=self.onset_anchor_prob,
+            gain_db_range=self.gain_db_range,
+            trim=False,  # already trimmed above
+            rng=rng,
+        )
 
         return {
             "audio": torch.from_numpy(audio.copy()),
             "caption": str(row["caption"]),
-            "duration": min(original_duration, self.duration),
+            "duration": max(0.0, min(content_duration, self.duration)),
         }
 
 

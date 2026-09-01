@@ -96,6 +96,26 @@ uv run synthgen-generate --prompt "warm analog pad with slow attack and reverb" 
 
 Experiment tracking uses **ClearML** as the primary destination. Dataset lineage is registered as a lightweight JSON manifest only — audio is never uploaded to the ClearML fileserver. See [docs/CLEARML.md](docs/CLEARML.md).
 
+## Training-data pipeline
+
+For a text-to-sample model the training target *is* the product: whatever the
+data pipeline does to a clip on the way into the batch is a statistic the model
+learns. `synthgen/data/preprocessing.py` holds the ordered pipeline that keeps
+that signal at sample-library standard — DC-free, silence-trimmed,
+onset-anchored, click-free, loudness-matched to −20 dBFS RMS and hard-bounded
+below a −1 dBFS true-peak ceiling by a soft limiter rather than a clipper.
+
+Render a before/after comparison on any audio (local paths or `s3://` URIs)
+with:
+
+```bash
+uv run python scripts/ab_preprocess_demo.py \
+    --source ./some_sound.wav --out-dir ./ab_demo --duration 6.0
+```
+
+It writes matched `*_before.wav` / `*_after.wav` pairs plus a `report.json` of
+the measured level, clipping, DC and onset differences.
+
 ## Datasets
 
 SynthGen is trained on a diverse mixture of audio-text datasets. See `synthgen/data/download.py` for automated download scripts.
