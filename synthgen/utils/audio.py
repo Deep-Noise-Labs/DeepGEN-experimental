@@ -144,16 +144,34 @@ def resample_audio(
             for ch in range(audio.shape[0])
         ])
         return resampled
-    else:
-        # Simple linear interpolation fallback
-        ratio = target_sr / orig_sr
-        new_length = int(audio.shape[-1] * ratio)
-        indices = np.linspace(0, audio.shape[-1] - 1, new_length)
-        resampled = np.stack([
-            np.interp(indices, np.arange(audio.shape[-1]), audio[ch])
+
+    try:
+        from math import gcd
+
+        from scipy.signal import resample_poly
+    except ImportError:
+        resample_poly = None
+
+    if resample_poly is not None:
+        # Band-limited polyphase resampling. Datasets arrive at mixed rates, so
+        # this path runs on real training data whenever librosa is absent -- and
+        # linear interpolation aliases every partial above the new Nyquist back
+        # down into the audible band, which the model then learns as timbre.
+        divisor = gcd(int(orig_sr), int(target_sr))
+        up, down = int(target_sr) // divisor, int(orig_sr) // divisor
+        return np.stack([
+            resample_poly(audio[ch], up, down)
             for ch in range(audio.shape[0])
-        ])
-        return resampled
+        ]).astype(np.float32)
+
+    # Last-resort linear interpolation. Aliases; install librosa or scipy.
+    ratio = target_sr / orig_sr
+    new_length = int(audio.shape[-1] * ratio)
+    indices = np.linspace(0, audio.shape[-1] - 1, new_length)
+    return np.stack([
+        np.interp(indices, np.arange(audio.shape[-1]), audio[ch])
+        for ch in range(audio.shape[0])
+    ])
 
 
 def normalize_audio(audio: np.ndarray, target_db: float = -3.0) -> np.ndarray:

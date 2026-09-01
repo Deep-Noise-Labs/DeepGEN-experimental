@@ -135,6 +135,16 @@ class TrainingConfig:
     num_workers: int = 8
     max_samples: int | None = None
 
+    # Sample-grade preprocessing (see synthgen/data/preprocessing.py)
+    target_rms_db: float = -20.0
+    peak_ceiling_db: float = -1.0
+    silence_floor_db: float = -60.0
+    onset_threshold_db: float = -35.0
+    onset_pre_roll_ms: float = 10.0
+    onset_anchor_prob: float = 0.5
+    gain_db_range: tuple[float, float] = (-6.0, 0.0)
+    trim_silence: bool = True
+
     # Distributed
     distributed: bool = False
 
@@ -320,6 +330,14 @@ class SynthGenTrainer:
             channels=config.audio_channels,
             augment=True,
             max_samples=config.max_samples,
+            target_rms_db=config.target_rms_db,
+            peak_ceiling_db=config.peak_ceiling_db,
+            silence_floor_db=config.silence_floor_db,
+            onset_threshold_db=config.onset_threshold_db,
+            onset_pre_roll_ms=config.onset_pre_roll_ms,
+            onset_anchor_prob=config.onset_anchor_prob,
+            gain_db_range=tuple(config.gain_db_range),
+            trim_silence=config.trim_silence,
         )
 
         sampler = None
