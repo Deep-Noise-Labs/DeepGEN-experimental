@@ -26,6 +26,8 @@ The architecture draws from state-of-the-art research in text-to-audio generatio
 
 **Why T5-base?** T5-base provides a strong text understanding backbone that has been validated across multiple audio generation systems (Stable Audio, AudioLDM). It balances quality with computational efficiency.
 
+**Why alias-free activations?** Snake (`x + (1/a)sin^2(ax)`) is a periodic non-linearity, so it synthesises harmonics above the Nyquist rate of whatever feature map it runs on; those fold back as inharmonic partials. Measured on this codebase, bare Snake puts alias energy at **-17 dB** relative to signal on an 8 kHz tone at alpha=2. Inharmonic grit is the defect that most clearly separates a cheap synth from a professional one, so the VAE runs its activations oversampled and band-limited, following BigVGAN. This is on by default (`antialias=True`) and adds no learnable parameters. See [docs/EVALS.md](docs/EVALS.md).
+
 ## Key Features
 
 - Text-conditioned generation of short audio samples (3–15 seconds)
@@ -41,6 +43,7 @@ The architecture draws from state-of-the-art research in text-to-audio generatio
 synthgen-experimental/
 ├── synthgen/
 │   ├── model/           # Neural network architecture
+│   │   ├── antialias.py # Alias-free resampling + activation wrapper
 │   │   ├── vae.py       # Audio VAE (encoder + decoder)
 │   │   ├── dit.py       # Diffusion Transformer
 │   │   ├── text_encoder.py  # T5-based text conditioning
@@ -55,11 +58,16 @@ synthgen-experimental/
 │   │   └── scheduler.py # Learning rate schedulers
 │   ├── inference/       # Inference utilities
 │   │   └── generate.py  # Generation pipeline
+│   ├── eval/            # Objective audio-quality metrics + alias benchmark
+│   │   ├── metrics.py   # ASR, THD, band error, crest, stereo correlation
+│   │   ├── probes.py    # Deterministic measurement signals
+│   │   └── alias_bench.py  # Weight-matched A/B harness
 │   ├── tracking/        # ClearML (primary) / WandB experiment tracking
 │   └── utils/           # Shared utilities
 │       └── audio.py     # Audio I/O utilities
 ├── tests/               # Unit and integration tests
 ├── docs/                # Documentation
+│   ├── EVALS.md         # What "sample-library grade" means, and how it is gated
 │   ├── TRAINING.md      # Training guidelines
 │   ├── CLEARML.md       # ClearML setup and upload policy
 │   └── TRITON_INFERENCE.md  # Triton deployment guide
