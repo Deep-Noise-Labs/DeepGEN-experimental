@@ -340,7 +340,7 @@ class SynthGenTrainer:
     def _init_loss(self):
         """Initialize loss functions."""
         if self.config.stage == "vae":
-            self.loss_fn = VAELoss()
+            self.loss_fn = VAELoss(sample_rate=self.config.sample_rate)
         else:
             self.loss_fn = FlowMatchingLoss(weighting="min_snr")
 

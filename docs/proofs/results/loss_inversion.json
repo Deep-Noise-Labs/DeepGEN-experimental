@@ -1,0 +1,143 @@
+{
+  "steps": 800,
+  "lr": 0.0003,
+  "seconds": 2.5,
+  "results": [
+    {
+      "file": "gen00_00491257_C1.wav",
+      "sample_rate": 32000,
+      "scores": {
+        "target": {
+          "air_band_error_db": 0.0,
+          "presence_band_error_db": 0.0,
+          "stereo_width_db": -1.4433214174165119,
+          "stereo_width_error_db": 0.0,
+          "si_sdr_db": 141.82314416510079
+        },
+        "damaged": {
+          "air_band_error_db": -11.999926120941623,
+          "presence_band_error_db": -0.935792063424266,
+          "stereo_width_db": -120.0,
+          "stereo_width_error_db": 118.55667858258349,
+          "si_sdr_db": 1.4135318758281523
+        },
+        "legacy": {
+          "air_band_error_db": 2.9527036424628434,
+          "presence_band_error_db": 0.24796690540695465,
+          "stereo_width_db": -14.571045663311741,
+          "stereo_width_error_db": 13.12772424589523,
+          "si_sdr_db": 3.043373128204257
+        },
+        "perceptual": {
+          "air_band_error_db": 0.001762016128921573,
+          "presence_band_error_db": 0.00015358978351542873,
+          "stereo_width_db": -4.026344034090531,
+          "stereo_width_error_db": 2.583022616674019,
+          "si_sdr_db": 11.44502677682014
+        }
+      }
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "sample_rate": 32000,
+      "scores": {
+        "target": {
+          "air_band_error_db": 0.0,
+          "presence_band_error_db": 0.0,
+          "stereo_width_db": -3.1886820265852043,
+          "stereo_width_error_db": 0.0,
+          "si_sdr_db": 151.08484806913913
+        },
+        "damaged": {
+          "air_band_error_db": -10.407966381002382,
+          "presence_band_error_db": -0.5973000974722993,
+          "stereo_width_db": -120.0,
+          "stereo_width_error_db": 116.8113179734148,
+          "si_sdr_db": 3.1886702054831235
+        },
+        "legacy": {
+          "air_band_error_db": 42.565950036859405,
+          "presence_band_error_db": 31.176843302846393,
+          "stereo_width_db": -34.46268079111203,
+          "stereo_width_error_db": 31.273998764526823,
+          "si_sdr_db": 3.2035828630788483
+        },
+        "perceptual": {
+          "air_band_error_db": -0.00301259546564836,
+          "presence_band_error_db": 0.03182747674776465,
+          "stereo_width_db": -3.1886854882414335,
+          "stereo_width_error_db": 3.4616562292200115e-06,
+          "si_sdr_db": 67.78334323852643
+        }
+      }
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "sample_rate": 32000,
+      "scores": {
+        "target": {
+          "air_band_error_db": 0.0,
+          "presence_band_error_db": 0.0,
+          "stereo_width_db": -6.069334048626401,
+          "stereo_width_error_db": 0.0,
+          "si_sdr_db": 157.10673241286312
+        },
+        "damaged": {
+          "air_band_error_db": -11.999996568925027,
+          "presence_band_error_db": -0.03793962586517097,
+          "stereo_width_db": -120.0,
+          "stereo_width_error_db": 113.9306659513736,
+          "si_sdr_db": 6.046711511451532
+        },
+        "legacy": {
+          "air_band_error_db": -4.035227781680511,
+          "presence_band_error_db": -0.005731668136416346,
+          "stereo_width_db": -32.140248367524464,
+          "stereo_width_error_db": 26.070914318898062,
+          "si_sdr_db": 6.1458936284669825
+        },
+        "perceptual": {
+          "air_band_error_db": 0.00148834095922723,
+          "presence_band_error_db": 0.015198791203054896,
+          "stereo_width_db": -11.079928729654789,
+          "stereo_width_error_db": 5.010594681028388,
+          "si_sdr_db": 12.837931227017956
+        }
+      }
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "sample_rate": 32000,
+      "scores": {
+        "target": {
+          "air_band_error_db": 0.0,
+          "presence_band_error_db": 0.0,
+          "stereo_width_db": 0.23095999623121172,
+          "stereo_width_error_db": 0.0,
+          "si_sdr_db": 149.64728989856462
+        },
+        "damaged": {
+          "air_band_error_db": -11.99999902891193,
+          "presence_band_error_db": -6.432092296933277,
+          "stereo_width_db": -120.0,
+          "stereo_width_error_db": 120.2309599962312,
+          "si_sdr_db": -0.7826669439342938
+        },
+        "legacy": {
+          "air_band_error_db": -2.329472532694858,
+          "presence_band_error_db": -2.676363375652194,
+          "stereo_width_db": -16.997760074170905,
+          "stereo_width_error_db": 17.22872007040212,
+          "si_sdr_db": 0.7368135123499735
+        },
+        "perceptual": {
+          "air_band_error_db": -0.0090494270356416,
+          "presence_band_error_db": -0.3108883387637391,
+          "stereo_width_db": -10.933361185065731,
+          "stereo_width_error_db": 11.164321181296943,
+          "si_sdr_db": 3.0539691092966166
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "full_8192": {
+    "share": {
+      "air_dulled_12db": 0.06989179658416231,
+      "hf_noise_substitution": 0.12031557046297503,
+      "sub_dulled_12db": 0.08747469159233834,
+      "mono_collapse": 0.25691856293371246,
+      "transient_smear": 0.4653993784268118
+    },
+    "waste": 0.004737665392047645
+  },
+  "max2048": {
+    "share": {
+      "air_dulled_12db": 0.07113499825564774,
+      "hf_noise_substitution": 0.12759423277247445,
+      "sub_dulled_12db": 0.08412227583995129,
+      "mono_collapse": 0.2532730499086041,
+      "transient_smear": 0.46387544322332247
+    },
+    "waste": 0.005235217840293128
+  }
+}

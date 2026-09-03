@@ -1,0 +1,68 @@
+{
+  "sample_rate": 44100,
+  "results": [
+    {
+      "pair": "E1 vs F1  (41.20 -> 43.65 Hz)",
+      "correct_hz": 41.2,
+      "wrong_hz": 43.65,
+      "separation_hz": 2.45,
+      "mrstft_max2048": {
+        "wrong_note_loss": 1.2043473720550537,
+        "gain_change_loss": 1.1808137893676758,
+        "ratio": 1.0199299693984605
+      },
+      "mrstft_max8192": {
+        "wrong_note_loss": 1.0598677396774292,
+        "gain_change_loss": 1.1783769130706787,
+        "ratio": 0.8994301635760736
+      },
+      "perceptual": {
+        "wrong_note_loss": 0.5060910582542419,
+        "gain_change_loss": 0.6393506526947021,
+        "ratio": 0.791570409948274
+      }
+    },
+    {
+      "pair": "E2 vs F2  (82.41 -> 87.31 Hz)",
+      "correct_hz": 82.41,
+      "wrong_hz": 87.31,
+      "separation_hz": 4.9,
+      "mrstft_max2048": {
+        "wrong_note_loss": 1.185105323791504,
+        "gain_change_loss": 1.179858684539795,
+        "ratio": 1.0044468369987507
+      },
+      "mrstft_max8192": {
+        "wrong_note_loss": 1.1688119173049927,
+        "gain_change_loss": 1.1800247430801392,
+        "ratio": 0.9904978045240997
+      },
+      "perceptual": {
+        "wrong_note_loss": 0.5297595858573914,
+        "gain_change_loss": 0.6417762637138367,
+        "ratio": 0.8254583658045778
+      }
+    },
+    {
+      "pair": "E3 vs F3  (164.81 -> 174.61 Hz)",
+      "correct_hz": 164.81,
+      "wrong_hz": 174.61,
+      "separation_hz": 9.8,
+      "mrstft_max2048": {
+        "wrong_note_loss": 1.2381720542907715,
+        "gain_change_loss": 1.1811110973358154,
+        "ratio": 1.0483112529241883
+      },
+      "mrstft_max8192": {
+        "wrong_note_loss": 1.3955223560333252,
+        "gain_change_loss": 1.1815627813339233,
+        "ratio": 1.1810818503083285
+      },
+      "perceptual": {
+        "wrong_note_loss": 0.6361185312271118,
+        "gain_change_loss": 0.6432304382324219,
+        "ratio": 0.9889434538812352
+      }
+    }
+  ]
+}

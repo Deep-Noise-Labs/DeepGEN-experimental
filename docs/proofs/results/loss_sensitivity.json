@@ -1,0 +1,1053 @@
+{
+  "n_files": 12,
+  "rows": [
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.7553513646125793
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.5083290338516235
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 0.8065229654312134
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 0.862960159778595
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.03683244436979294
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.05232506990432739
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 1.1004798412322998
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 1.4460062980651855
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 6.447332382202148
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 2.926818370819092
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.0940009355545044
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.012190135195851326
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.1895824670791626
+    },
+    {
+      "file": "gen00_00491257_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 1.3350796699523926
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.6936609745025635
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.0007864019135013223
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 0.531003475189209
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 0.0011365596437826753
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.06173089146614075
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.09600573778152466
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 0.8870261311531067
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 0.6773310899734497
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 6.49843692779541
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 1.6840705871582031
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.6246553659439087
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.0006640373612754047
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.189544677734375
+    },
+    {
+      "file": "gen01_08476166_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 0.8107246160507202
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.7532942891120911
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.09372107684612274
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 1.9774713516235352
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 0.2719646096229553
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.2229245901107788
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.29431822896003723
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 0.8376089334487915
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 0.6650159358978271
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 6.506142616271973
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 1.5641751289367676
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.5381466746330261
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.00048679119208827615
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.189550518989563
+    },
+    {
+      "file": "gen02_14d067a1_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 0.8413220047950745
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.9020925164222717
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 1.2333906888961792
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 0.744961142539978
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 1.4785683155059814
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.11469363421201706
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.1789843589067459
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 1.0233370065689087
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 1.7268105745315552
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 6.422654151916504
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 4.017149925231934
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.006434876471757889
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.005632398184388876
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.1895880699157715
+    },
+    {
+      "file": "gen03_1b01482e_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 1.6349494457244873
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.7783284187316895
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.6114888191223145
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 1.1104052066802979
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 1.0337989330291748
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.16948437690734863
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.25270023941993713
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 1.4143445491790771
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 1.5534470081329346
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 6.336750030517578
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 3.0737624168395996
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.15159320831298828
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.0024967994540929794
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.1895778179168701
+    },
+    {
+      "file": "gen04_281e24a6_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 1.3220608234405518
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.7006399035453796
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.0026302337646484375
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 0.962504506111145
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 0.003898222930729389
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.759925127029419
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 1.1359349489212036
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 1.1652188301086426
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 0.8065695762634277
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 5.317493438720703
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 0.3910122513771057
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.3018115758895874
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.00021097312855999917
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.1895931959152222
+    },
+    {
+      "file": "gen05_34293341_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 0.7847778797149658
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.7108944058418274
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.05504097044467926
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 1.2905884981155396
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 0.10753890872001648
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.01370520330965519
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.015482657589018345
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 1.252220869064331
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 0.8903837203979492
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 6.302178859710693
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 1.6869820356369019
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.5553269982337952
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.002753951819613576
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.189548134803772
+    },
+    {
+      "file": "gen06_3dc223ba_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 0.8629428744316101
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.791630744934082
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.41286784410476685
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 1.0207178592681885
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 0.8269557952880859
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.1292901337146759
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.19881406426429749
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 1.1884064674377441
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 1.2780159711837769
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 6.361593246459961
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 2.312256097793579
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.1010681763291359
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.008107270114123821
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.1895817518234253
+    },
+    {
+      "file": "gen07_4ddd367f_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 1.1784875392913818
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.7195563316345215
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.10690787434577942
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 0.7223445177078247
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 0.14576154947280884
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.2834275960922241
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.3486183285713196
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 1.289458990097046
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 1.3025811910629272
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 6.35638952255249
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 1.8376517295837402
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.25706514716148376
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.016902929171919823
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.1895732879638672
+    },
+    {
+      "file": "gen08_5cd49b4d_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 0.9667019844055176
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.7382996678352356
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.09302236139774323
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 2.004908800125122
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 0.14293426275253296
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.6106391549110413
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.8444068431854248
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 0.8606867790222168
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 0.7261617183685303
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 6.131814479827881
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 1.3915339708328247
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.6172562837600708
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.0003731244942173362
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.18954336643219
+    },
+    {
+      "file": "gen09_6bc8db70_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 0.8678003549575806
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.7214242219924927
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.042168132960796356
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 1.1357616186141968
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 0.18372592329978943
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.031478751450777054
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.04187852144241333
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 1.2345919609069824
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 0.9251474142074585
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 6.3861870765686035
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 1.5629701614379883
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.6968797445297241
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.003162721637636423
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.1895356178283691
+    },
+    {
+      "file": "gen10_809ba3ba_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 0.8183705806732178
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "legacy",
+      "value": 0.8984248638153076
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "air_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.5337157249450684
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "legacy",
+      "value": 2.005316734313965
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "hf_noise_substitution",
+      "loss": "perceptual",
+      "value": 1.5667767524719238
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "legacy",
+      "value": 0.6152185797691345
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "sub_dulled_12db",
+      "loss": "perceptual",
+      "value": 0.9090347290039062
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "legacy",
+      "value": 1.2065154314041138
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "mono_collapse",
+      "loss": "perceptual",
+      "value": 1.1551011800765991
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "legacy",
+      "value": 6.1156110763549805
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "transient_smear",
+      "loss": "perceptual",
+      "value": 1.6408562660217285
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "legacy",
+      "value": 0.3228949308395386
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "inaudible_dither",
+      "loss": "perceptual",
+      "value": 0.0013922632206231356
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "legacy",
+      "value": 1.1895687580108643
+    },
+    {
+      "file": "gen11_8ab6d565_C1.wav",
+      "degradation": "gain_minus_6db",
+      "loss": "perceptual",
+      "value": 1.0012128353118896
+    }
+  ],
+  "mean_values": {
+    "legacy": {
+      "air_dulled_12db": 0.7636331419150034,
+      "hf_noise_substitution": 1.1927088896433513,
+      "sub_dulled_12db": 0.25411254027858377,
+      "mono_collapse": 1.121657982468605,
+      "transient_smear": 6.265215317408244,
+      "inaudible_dither": 0.35559449313829344,
+      "gain_minus_6db": 1.189565638701121
+    },
+    "perceptual": {
+      "air_dulled_12db": 0.3078390968827686,
+      "hf_noise_substitution": 0.552168332709698,
+      "sub_dulled_12db": 0.36404197732917964,
+      "mono_collapse": 1.0960476398468018,
+      "transient_smear": 2.0074365784724555,
+      "inaudible_dither": 0.004531116247865914,
+      "gain_minus_6db": 1.0353692173957825
+    }
+  },
+  "allocation_share": {
+    "legacy": {
+      "air_dulled_12db": 0.07956726623518406,
+      "hf_noise_substitution": 0.12427510090163985,
+      "sub_dulled_12db": 0.02647742618312852,
+      "mono_collapse": 0.1168719040822257,
+      "transient_smear": 0.6528083025978219
+    },
+    "perceptual": {
+      "air_dulled_12db": 0.07113499825564774,
+      "hf_noise_substitution": 0.12759423277247445,
+      "sub_dulled_12db": 0.08412227583995129,
+      "mono_collapse": 0.2532730499086041,
+      "transient_smear": 0.46387544322332247
+    }
+  },
+  "wasted_sensitivity": {
+    "legacy": 0.1852570308587338,
+    "perceptual": 0.005235217840293128
+  }
+}
