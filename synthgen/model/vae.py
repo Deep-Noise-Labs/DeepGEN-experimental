@@ -29,16 +29,64 @@ class Snake(nn.Module):
 
     Provides periodic inductive bias that is beneficial for audio synthesis,
     as shown in BigVGAN and Stable Audio.
+
+    ``alpha`` is stored in log space so that it is strictly positive, which is
+    what BigVGAN does. Two concrete things go wrong when it is not.
+
+    First, ``1 / (alpha + 1e-8)`` is exactly singular at ``alpha == -1e-8``:
+    that one representable value returns ``inf`` for both the activation and
+    its gradient. It is a single point and unlikely to be hit, but it is a
+    real NaN source with no upside.
+
+    Second, and the reason this matters more: negative alpha does not give a
+    badly-scaled Snake, it gives a *different function*. Because ``sin^2`` is
+    even, flipping the sign of alpha flips the sign of the whole periodic
+    term, mirroring the activation about the origin. Half the parameter space
+    therefore silently implements something that is not the activation the
+    architecture is documented to use, and nothing in the old formulation
+    stopped an optimiser from wandering into it.
+
+    Note what this does *not* fix. The reciprocal is not a blow-up hazard in
+    general: ``sin^2(alpha*x) / alpha`` tends to ``alpha * x^2`` as alpha
+    approaches zero, so the numerator vanishes as fast as the denominator and
+    both the output and the gradient stay bounded. That was measured, not
+    assumed -- see ``experiments/run_snake_stability.py``. This change is a
+    correctness guard, not a fix for observed training instability.
+
+    Checkpoints written before this change store a raw ``alpha`` buffer; they
+    are converted on load, so existing weights keep working.
     """
 
     def __init__(self, channels: int, alpha_init: float = 1.0):
         super().__init__()
-        self.alpha = nn.Parameter(
-            torch.full((1, channels, 1), alpha_init)
+        if alpha_init <= 0:
+            raise ValueError(f"alpha_init must be positive, got {alpha_init}")
+        self.log_alpha = nn.Parameter(
+            torch.full((1, channels, 1), math.log(alpha_init))
         )
+        self._register_load_state_dict_pre_hook(self._convert_legacy_alpha)
+
+    @property
+    def alpha(self) -> torch.Tensor:
+        """The effective alpha, always positive."""
+        return self.log_alpha.exp()
+
+    @staticmethod
+    def _convert_legacy_alpha(
+        state_dict, prefix, local_metadata, strict, missing_keys,
+        unexpected_keys, error_msgs,
+    ) -> None:
+        """Convert a pre-log-space ``alpha`` entry to ``log_alpha`` on load."""
+        legacy_key = prefix + "alpha"
+        new_key = prefix + "log_alpha"
+        if legacy_key in state_dict and new_key not in state_dict:
+            legacy = state_dict.pop(legacy_key)
+            state_dict[new_key] = legacy.clamp(min=1e-4).log()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + (1.0 / (self.alpha + 1e-8)) * torch.sin(self.alpha * x) ** 2
+        alpha = self.log_alpha.exp()
+        inv_alpha = torch.exp(-self.log_alpha)
+        return x + inv_alpha * torch.sin(alpha * x) ** 2
 
 
 # =============================================================================

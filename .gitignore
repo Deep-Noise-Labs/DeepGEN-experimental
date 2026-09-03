@@ -47,3 +47,8 @@ output/
 *.mp3
 *.flac
 outputs/
+
+# Exception: the committed listening evidence for docs/EVALUATION.md. These are
+# small, fixed, and referenced by the write-up, so they are version-controlled
+# deliberately. Do not widen this exception to generated audio in general.
+!docs/proofs/**/*.wav
