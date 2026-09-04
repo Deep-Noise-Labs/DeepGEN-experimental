@@ -140,55 +140,104 @@ def main() -> None:
 
 
 def build_trained_section(trained: dict, fig_curves: str) -> str:
-    alias_rows = ""
-    base = {r["f0"]: r["alias_to_signal_db"] for r in trained["alias"]["baseline"]}
-    anti = {r["f0"]: r["alias_to_signal_db"] for r in trained["alias"]["antialias"]}
-    for f0 in base:
-        alias_rows += (
-            f"<tr><td>{f0:,.1f}</td><td>{base[f0]:.2f}</td>"
-            f"<td>{anti[f0]:.2f}</td>"
-            f'<td class="win">-{base[f0]-anti[f0]:.1f}</td></tr>'
-        )
+    """
+    Render the trained A/B honestly.
 
+    The alias-through-the-codec measurement only means something if the codec
+    reconstructs the probe at all; ``generate_proofs`` marks each reading
+    with ``attributable``. At this scale none of them are, so the section
+    reports that rather than quoting a number it cannot stand behind.
+    """
     recon_rows = ""
     for clip in trained["reconstructions"]:
         b, a = clip["baseline"], clip["antialias"]
         recon_rows += (
             f"<tr><td>{clip['name']}</td>"
             f"<td>{b['si_sdr_db']:.2f}</td><td>{a['si_sdr_db']:.2f}</td>"
-            f"<td>{b['multires_stft']:.3f}</td><td>{a['multires_stft']:.3f}</td></tr>"
+            f"<td>{b['multires_stft']:.3f}</td><td>{a['multires_stft']:.3f}</td>"
+            f"<td>{b['hf_retention_db']:.2f}</td><td>{a['hf_retention_db']:.2f}</td></tr>"
+        )
+
+    probe_rows = ""
+    for f0_row_b, f0_row_a in zip(
+        trained["alias"]["baseline"], trained["alias"]["antialias"]
+    ):
+        probe_rows += (
+            f"<tr><td>{f0_row_b['f0']:,.1f}</td>"
+            f"<td>{f0_row_b['probe_si_sdr_db']:.2f}</td>"
+            f"<td>{f0_row_a['probe_si_sdr_db']:.2f}</td>"
+            f"<td>{f0_row_b['alias_to_signal_db']:.2f}</td>"
+            f"<td>{f0_row_a['alias_to_signal_db']:.2f}</td></tr>"
         )
 
     hist = trained.get("histories", {})
     final = ""
     if "baseline" in hist and "antialias" in hist:
         final = (
-            f"<p>Final multi-resolution STFT loss after "
-            f"{hist['baseline']['step']:,} steps: "
-            f"<b>{hist['baseline']['spectral']:.4f}</b> before, "
-            f"<b>{hist['antialias']['spectral']:.4f}</b> after.</p>"
+            f"<p>After {hist['baseline']['step']:,} matched steps the "
+            f"multi-resolution STFT training loss was "
+            f"<b>{hist['baseline']['spectral']:.4f}</b> for the baseline and "
+            f"<b>{hist['antialias']['spectral']:.4f}</b> for the anti-aliased "
+            f"arm. The baseline trains slightly better at this scale, which is "
+            f"the expected trade: band-limiting removes content the "
+            f"reconstruction loss was being scored on.</p>"
         )
+
+    threshold = trained.get("min_recon_si_sdr_db", 10.0)
 
     return f"""
     <section id="trained">
-      <p class="eyebrow">Proof 6</p>
-      <h2>A trained A/B, at small scale</h2>
-      <p>Two VAEs trained from the same seed on the same real audio for the
-      same number of steps, with the same parameter count. The only
-      difference is the activation. This is a controlled comparison on CPU
-      at tiny scale - it is not evidence of shippable quality.</p>
+      <p class="eyebrow">The experiment that did not work</p>
+      <h2>A trained A/B, and why its headline number is not reportable</h2>
+      <p>Two VAEs trained from the same seed on the same 63 seconds of real
+      audio for the same 1,500 steps, with byte-identical parameter counts.
+      The only difference is the activation. The intent was a sixth proof:
+      aliasing measured through a genuinely trained codec.</p>
       {final}
-      <figure><img src="{fig_curves}" alt="Multi-resolution STFT training loss against step for both arms"></figure>
-      <h3>Aliasing through the trained codec</h3>
+      <figure><img src="{fig_curves}" alt="Multi-resolution STFT training loss against step for both arms, tracking closely with the baseline slightly lower"></figure>
+
+      <div class="note">
+        <h3>The alias measurement here is not attributable, so it is not a proof</h3>
+        <p>An alias reading through a codec only means something if the codec
+        reconstructs the probe. These do not. At 2,090 Hz the sawtooth
+        reconstruction scores <b>-42 dB SI-SDR</b> with a multi-resolution
+        STFT distance of exactly <b>1.000</b> - the output is unrelated to the
+        input. The resulting "alias-to-signal ratio" of +38 dB is measuring
+        a codec that cannot reconstruct, not a decoder that aliases.</p>
+        <p>A 64x-compression codec trained for 1,500 CPU steps on 63 seconds
+        of music cannot reproduce an out-of-distribution sawtooth. That is a
+        scale problem, not an activation problem, and quoting the 3.6 dB
+        average "improvement" these runs produce would be dressing up noise
+        as a result.</p>
+        <p><code>generate_proofs.py</code> now enforces this automatically:
+        every reading carries the SI-SDR of its own probe reconstruction and
+        is marked unusable below {threshold:.0f} dB. All six readings below
+        are flagged unusable.</p>
+      </div>
+
       <div class="tw"><table>
-        <thead><tr><th>Note f0 (Hz)</th><th>Before (dB)</th><th>After (dB)</th><th>Improvement</th></tr></thead>
-        <tbody>{alias_rows}</tbody>
+        <thead><tr><th>Probe f0 (Hz)</th><th>SI-SDR before</th><th>SI-SDR after</th><th>ASR before</th><th>ASR after</th></tr></thead>
+        <tbody>{probe_rows}</tbody>
       </table></div>
-      <h3>Held-out reconstruction</h3>
+      <p style="font-size:.9rem;color:var(--ink-muted)">Every row fails the
+      {threshold:.0f} dB reconstruction floor, so neither ASR column carries
+      information about aliasing.</p>
+
+      <h3>What this run does show</h3>
+      <p>The reconstruction comparison on held-out real audio <em>is</em> a
+      valid matched test, and it shows the honest cost of the change at this
+      scale: the anti-aliased arm gives up a little waveform fidelity. It
+      also holds the air band closer to the source on the Bach clip
+      (+1.03 dB versus -5.96 dB), which is the direction the change predicts,
+      on one clip out of two.</p>
       <div class="tw"><table>
-        <thead><tr><th>Clip</th><th>SI-SDR before</th><th>SI-SDR after</th><th>MR-STFT before</th><th>MR-STFT after</th></tr></thead>
+        <thead><tr><th>Held-out clip</th><th>SI-SDR before</th><th>SI-SDR after</th><th>MR-STFT before</th><th>MR-STFT after</th><th>Air band before</th><th>Air band after</th></tr></thead>
         <tbody>{recon_rows}</tbody>
       </table></div>
+      <p style="font-size:.9rem;color:var(--ink-muted)">SI-SDR and air-band
+      figures in dB; MR-STFT is a distance, lower is better. Absolute quality
+      is poor in both arms - this is a 0.26 M-parameter codec trained on CPU,
+      not a model anyone would ship.</p>
     </section>"""
 
 
@@ -551,9 +600,11 @@ TEMPLATE = r"""<title>Alias-Free DeepGEN</title>
   <ul>
     <li><strong>Nothing about final trained model quality.</strong> There are no production
     checkpoints. The module-stack comparisons use randomly initialised weights.</li>
-    <li><strong>An untrained full-VAE round-trip was tried and discarded as invalid.</strong>
-    At random init the encoder's 1024&times; decimation destroys the signal and the output is
-    broadband noise, so the alias metric is meaningless there. It is not reported as a proof.</li>
+    <li><strong>Two whole experiments were run and thrown out.</strong> An untrained
+    full-VAE round-trip (at random init the encoder's 1024x decimation destroys the signal),
+    and the alias measurement through the trained codec above. Both failed the same way:
+    the model could not reconstruct the probe, so the metric stopped being about aliasing.
+    Neither is counted as a proof.</li>
     <li><strong>No comparison against any named commercial product.</strong> Nothing here was
     measured against Serum, Spitfire or Splice, and no such claim should be made without
     doing that work.</li>

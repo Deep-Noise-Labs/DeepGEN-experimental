@@ -88,7 +88,8 @@ activation.
 
 ## What I got wrong, and how it was caught
 
-Four mistakes. All four would have produced a confident, wrong report.
+Five things went wrong. Four of them would have produced a confident,
+wrong report if I had not caught them.
 
 **1. I chose test frequencies by eye.** I picked "110.3, 220.5, 440.7,
 2371.3, 4409.1 Hz" - they look irregular, so they look safe. They are not.
@@ -119,7 +120,25 @@ valid substitute is the audio-rate `ResidualBlock` stack, where residual
 connections keep the signal intact and identical weights isolate the
 activation.
 
-**4. A unit test of mine failed for the right reason.** I asserted that a
+**4. The trained A/B did not work, and I did not dress it up.** I trained two
+0.26M-parameter VAEs (same seed, same 63 s corpus, same 1,500 steps, same
+parameter count, only the activation differing) to get a sixth proof:
+aliasing through a genuinely trained codec. The raw output looked usable -
+a 3.6 dB average "improvement". It is not usable. At 2,090 Hz the codec's
+sawtooth reconstruction scores **-42 dB SI-SDR** with a multi-resolution
+STFT distance of exactly **1.000**: the output is unrelated to the input.
+The alias metric was measuring a codec that cannot reconstruct, not a
+decoder that aliases - the identical failure mode to mistake 3.
+
+`generate_proofs.py` now enforces this: every alias reading through a codec
+carries the SI-SDR of its own probe reconstruction and is marked
+`attributable: false` below 10 dB. **Do not report an alias number through
+a codec that cannot reconstruct the probe.** The valid part of that run is
+the held-out reconstruction comparison, which shows the change costs a
+little waveform fidelity at this scale (SI-SDR 5.87 -> 5.34 and 5.22 -> 5.02
+dB) while holding the air band closer to source on one clip of two.
+
+**5. A unit test of mine failed for the right reason.** I asserted that a
 sawtooth rolled by 200 samples is "wide" stereo - but the saw's period is
 ~100 samples, so the rolled copy is nearly in phase and correlation stays
 ~1. The metric was right; my test signal was wrong.
@@ -136,6 +155,10 @@ sawtooth rolled by 200 samples is "wide" stereo - but the saw's period is
   synth-heavy material).
 
 **Not proven:**
+- **Anything measured through a trained codec.** Both attempts (untrained
+  full VAE, and the 1,500-step trained A/B) failed the reconstruction floor,
+  so neither says anything about aliasing. Getting this proof needs a codec
+  that can actually reconstruct - which needs GPU time, not another CPU run.
 - Anything about final trained model quality. There are still no production
   checkpoints. The small CPU A/B in `experiments/` is a controlled
   comparison at tiny scale, not evidence of shippable quality.

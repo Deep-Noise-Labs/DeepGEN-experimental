@@ -204,5 +204,128 @@
       },
       "isolated_alias_level_db": -36.06
     }
-  ]
+  ],
+  "trained": {
+    "available": true,
+    "histories": {
+      "baseline": {
+        "step": 1500,
+        "loss": 1.5535390377044678,
+        "l1": 0.040374502539634705,
+        "spectral": 1.5131614208221436,
+        "elapsed_s": 595.2239031791687
+      },
+      "antialias": {
+        "step": 1500,
+        "loss": 1.6926820278167725,
+        "l1": 0.04223046824336052,
+        "spectral": 1.6504486799240112,
+        "elapsed_s": 1530.5006392002106
+      }
+    },
+    "reconstructions": [
+      {
+        "name": "aisynth_fixture",
+        "source_file": "/home/user/deep-noise-effects-api/tests/fixtures/frontend_nofx_reference.wav",
+        "source": {
+          "file": "p6_aisynth_fixture_source.wav",
+          "seconds": 0.65,
+          "applied_gain_db": 1.69
+        },
+        "baseline": {
+          "audio": {
+            "file": "p6_aisynth_fixture_baseline.wav",
+            "seconds": 0.65,
+            "applied_gain_db": 3.8
+          },
+          "si_sdr_db": 5.87,
+          "multires_stft": 0.4145,
+          "hf_retention_db": -7.82
+        },
+        "antialias": {
+          "audio": {
+            "file": "p6_aisynth_fixture_antialias.wav",
+            "seconds": 0.65,
+            "applied_gain_db": 4.9
+          },
+          "si_sdr_db": 5.34,
+          "multires_stft": 0.4429,
+          "hf_retention_db": -6.92
+        }
+      },
+      {
+        "name": "bach",
+        "source_file": "/home/user/audiocraft/assets/bach.mp3",
+        "source": {
+          "file": "p6_bach_source.wav",
+          "seconds": 2.0,
+          "applied_gain_db": 1.69
+        },
+        "baseline": {
+          "audio": {
+            "file": "p6_bach_baseline.wav",
+            "seconds": 2.0,
+            "applied_gain_db": 5.12
+          },
+          "si_sdr_db": 5.22,
+          "multires_stft": 0.4455,
+          "hf_retention_db": -5.96
+        },
+        "antialias": {
+          "audio": {
+            "file": "p6_bach_antialias.wav",
+            "seconds": 2.0,
+            "applied_gain_db": 6.22
+          },
+          "si_sdr_db": 5.02,
+          "multires_stft": 0.5311,
+          "hf_retention_db": 1.03
+        }
+      }
+    ],
+    "alias": {
+      "baseline": [
+        {
+          "f0": 453.1,
+          "alias_to_signal_db": -12.16,
+          "probe_si_sdr_db": 4.16,
+          "attributable": false
+        },
+        {
+          "f0": 903.7,
+          "alias_to_signal_db": -11.64,
+          "probe_si_sdr_db": 1.69,
+          "attributable": false
+        },
+        {
+          "f0": 2090.1,
+          "alias_to_signal_db": 38.87,
+          "probe_si_sdr_db": -42.58,
+          "attributable": false
+        }
+      ],
+      "antialias": [
+        {
+          "f0": 453.1,
+          "alias_to_signal_db": -18.23,
+          "probe_si_sdr_db": 3.83,
+          "attributable": false
+        },
+        {
+          "f0": 903.7,
+          "alias_to_signal_db": -12.51,
+          "probe_si_sdr_db": 1.32,
+          "attributable": false
+        },
+        {
+          "f0": 2090.1,
+          "alias_to_signal_db": 34.88,
+          "probe_si_sdr_db": -41.78,
+          "attributable": false
+        }
+      ]
+    },
+    "alias_attributable": false,
+    "min_recon_si_sdr_db": 10.0
+  }
 }

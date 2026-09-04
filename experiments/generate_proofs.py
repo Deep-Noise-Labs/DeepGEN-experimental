@@ -439,7 +439,16 @@ def proof_trained(out: Path, run_dir: Path, holdout: list[tuple[str, Path, float
             }
         per_clip.append(entry)
 
-    # Alias measurement on the trained decoders
+    # Alias measurement on the trained decoders.
+    #
+    # VALIDITY GUARD. An alias reading is only attributable to the activation
+    # if the codec actually reconstructs the probe. A codec that outputs
+    # noise scores terribly on the alias metric for reasons that have nothing
+    # to do with aliasing - the same trap that invalidated the untrained
+    # full-VAE experiment. So each reading carries the SI-SDR of that
+    # reconstruction, and anything below the threshold is marked unusable
+    # rather than quietly reported as a result.
+    MIN_RECON_SI_SDR_DB = 10.0
     alias = {}
     for arm, model in models.items():
         rows = []
@@ -449,15 +458,23 @@ def proof_trained(out: Path, run_dir: Path, holdout: list[tuple[str, Path, float
             with torch.no_grad():
                 mean, _ = model.encode(x)
                 recon = model.decode(mean)[0, 0].numpy()
+            n = min(len(recon), len(stimulus))
+            probe_si_sdr = float(si_sdr_db(recon[:n], stimulus[:n]))
             rows.append(
                 {
                     "f0": f0,
                     "alias_to_signal_db": round(
-                        harmonic_analysis(recon, f0, SR).alias_to_signal_db, 2
+                        float(harmonic_analysis(recon, f0, SR).alias_to_signal_db), 2
                     ),
+                    "probe_si_sdr_db": round(probe_si_sdr, 2),
+                    "attributable": bool(probe_si_sdr >= MIN_RECON_SI_SDR_DB),
                 }
             )
         alias[arm] = rows
+
+    attributable = any(
+        row["attributable"] for rows in alias.values() for row in rows
+    )
 
     payload.update(
         {
@@ -465,6 +482,8 @@ def proof_trained(out: Path, run_dir: Path, holdout: list[tuple[str, Path, float
             "histories": {k: v[-1] for k, v in histories.items()},
             "reconstructions": per_clip,
             "alias": alias,
+            "alias_attributable": attributable,
+            "min_recon_si_sdr_db": MIN_RECON_SI_SDR_DB,
         }
     )
     return payload

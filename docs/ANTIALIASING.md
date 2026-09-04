@@ -142,10 +142,24 @@ The rendered WAVs are in `proofs/audio/`.
   nonlinearity is a property of the *function*, not of the learned weights,
   and both arms share identical weights. It is *not* evidence about final
   model quality.
-- An untrained **full VAE** round-trip was tried and **discarded**: at
-  random init the encoder's 1024× decimation destroys the signal, output is
-  broadband noise, and the alias metric is meaningless there. It is not
-  reported as a proof.
+- **Two experiments were run and discarded**, both for the same reason: the
+  model could not reconstruct the probe, so the alias metric stopped being
+  about aliasing.
+  1. An untrained **full VAE** round-trip - at random init the encoder's
+     1024× decimation destroys the signal and the output is broadband noise.
+  2. A **trained A/B** (two 0.26M-parameter VAEs, matched seed, corpus,
+     steps and parameter count, 1,500 CPU steps). Its headline looked like a
+     3.6 dB improvement, but at 2,090 Hz the sawtooth reconstruction scores
+     -42 dB SI-SDR with a multi-resolution STFT distance of exactly 1.000.
+     `generate_proofs.py` now attaches the probe reconstruction's SI-SDR to
+     every alias reading and marks it `attributable: false` below 10 dB.
+
+  The valid part of the trained run is the held-out reconstruction
+  comparison: the anti-aliased arm gives up a little waveform fidelity at
+  this scale (SI-SDR 5.87 → 5.34 dB and 5.22 → 5.02 dB; MR-STFT 0.414 →
+  0.443 and 0.446 → 0.531) while holding the air band closer to the source
+  on one clip of two (-5.96 → +1.03 dB on Bach). That is the honest trade at
+  1,500 CPU steps, not a verdict on the change at production scale.
 - 2× oversampling is a compromise. 4× measures better still (see
   `test_higher_ratio_reduces_alias_further`) at higher compute cost.
 - The remaining ~19 dB gap to the −60 dB gate is not closed by this change
