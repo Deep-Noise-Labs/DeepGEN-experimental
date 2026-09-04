@@ -192,3 +192,53 @@ def test_identity_reconstruction_passes_the_reference_gates():
     results = evaluate_reconstruction(stereo, stereo, SR)
     for key in ("hf_retention_db", "transient_error_ms", "si_sdr_db", "multires_stft"):
         assert results[key].passed, f"{key} = {results[key].value}"
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def test_cli_gates_listing_runs(capsys):
+    from synthgen.eval.cli import main
+
+    assert main(["gates"]) == 0
+    out = capsys.readouterr().out
+    assert "alias_to_signal_db" in out
+    assert "target" in out
+
+
+def test_cli_reports_pass_and_fail(tmp_path, capsys):
+    """A clean signal passes the synthesis gates; a dirty one fails."""
+    import soundfile as sf
+
+    from synthgen.eval.cli import main
+
+    f0 = 903.7
+    clean = bandlimited_saw(f0, 0.5, SR, 0.5)
+    rng = np.random.default_rng(0)
+    dirty = clean + 0.05 * rng.normal(size=len(clean)).astype(np.float32)
+
+    clean_path = tmp_path / "clean.wav"
+    dirty_path = tmp_path / "dirty.wav"
+    sf.write(str(clean_path), clean, SR)
+    sf.write(str(dirty_path), dirty, SR)
+
+    assert main(["synthesis", "--audio", str(clean_path), "--f0", str(f0)]) == 0
+    assert main(["synthesis", "--audio", str(dirty_path), "--f0", str(f0)]) == 1
+    assert "PASS" in capsys.readouterr().out
+
+
+def test_cli_reconstruction_json(tmp_path, capsys):
+    import json as _json
+
+    import soundfile as sf
+
+    from synthgen.eval.cli import main
+
+    x = bandlimited_saw(453.1, 0.5, SR, 0.5)
+    path = tmp_path / "a.wav"
+    sf.write(str(path), x, SR)
+    main(["reconstruction", "--pred", str(path), "--target", str(path), "--json"])
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["si_sdr_db"]["passed"] is True

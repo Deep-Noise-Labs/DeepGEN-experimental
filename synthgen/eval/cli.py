@@ -49,20 +49,31 @@ def _print_table(results: dict[str, Result]) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="synthgen-eval")
+    # --json lives on a parent parser so it is accepted *after* the
+    # subcommand, where anyone would naturally type it. Declaring it on the
+    # top-level parser only works before the subcommand, which is a trap.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true", help="emit JSON instead")
+
+    parser = argparse.ArgumentParser(prog="synthgen-eval", parents=[common])
     sub = parser.add_subparsers(dest="mode", required=True)
 
-    syn = sub.add_parser("synthesis", help="reference-free alias/purity gates")
+    syn = sub.add_parser(
+        "synthesis", parents=[common], help="reference-free alias/purity gates"
+    )
     syn.add_argument("--audio", type=Path, required=True)
     syn.add_argument("--f0", type=float, required=True, help="fundamental in Hz")
 
-    rec = sub.add_parser("reconstruction", help="reference-based fidelity gates")
+    rec = sub.add_parser(
+        "reconstruction", parents=[common], help="reference-based fidelity gates"
+    )
     rec.add_argument("--pred", type=Path, required=True)
     rec.add_argument("--target", type=Path, required=True)
 
-    sub.add_parser("gates", help="print the gate definitions and rationale")
+    sub.add_parser(
+        "gates", parents=[common], help="print the gate definitions and rationale"
+    )
 
-    parser.add_argument("--json", action="store_true", help="emit JSON instead")
     args = parser.parse_args(argv)
 
     if args.mode == "gates":

@@ -56,11 +56,14 @@ class Gate:
     rationale: str
 
     def passes(self, value: float) -> bool:
+        # Cast to native types: metrics return numpy scalars, and a
+        # numpy.bool_ leaking out here is not JSON-serialisable downstream.
+        value = float(value)
         if self.direction == "lower_is_better":
-            return value <= self.target
+            return bool(value <= self.target)
         if self.direction == "higher_is_better":
-            return value >= self.target
-        return abs(value) <= abs(self.target)
+            return bool(value >= self.target)
+        return bool(abs(value) <= abs(self.target))
 
 
 @dataclass
@@ -71,6 +74,10 @@ class Result:
     value: float
     passed: bool
     detail: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.value = float(self.value)
+        self.passed = bool(self.passed)
 
 
 # =============================================================================
