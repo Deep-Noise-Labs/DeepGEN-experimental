@@ -73,6 +73,23 @@ def batches(clips: list[np.ndarray], batch_size: int, seed: int):
         yield torch.from_numpy(np.stack(rows)).unsqueeze(1)
 
 
+def _save(model, args, n_params: int, step: int, history: list) -> None:
+    """Write the checkpoint atomically so a reaped run leaves a usable file."""
+    target = args.out_dir / f"vae_{args.arm}.pt"
+    tmp = target.with_suffix(".pt.tmp")
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "arm": args.arm,
+            "params": n_params,
+            "step": step,
+        },
+        tmp,
+    )
+    tmp.replace(target)
+    (args.out_dir / f"history_{args.arm}.json").write_text(json.dumps(history, indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--arm", choices=["baseline", "antialias"], required=True)
@@ -82,6 +99,13 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--out-dir", type=Path, default=Path("experiments/out"))
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=250,
+        help="Write a resumable checkpoint this often. A long CPU run can be "
+        "reaped by the environment; without this, everything is lost.",
+    )
     parser.add_argument("--corpus", type=Path, nargs="+", required=True)
     args = parser.parse_args()
 
@@ -143,11 +167,10 @@ def main() -> None:
                 flush=True,
             )
 
-    torch.save(
-        {"state_dict": model.state_dict(), "arm": args.arm, "params": n_params},
-        args.out_dir / f"vae_{args.arm}.pt",
-    )
-    (args.out_dir / f"history_{args.arm}.json").write_text(json.dumps(history, indent=2))
+        if args.checkpoint_every and step % args.checkpoint_every == 0:
+            _save(model, args, n_params, step, history)
+
+    _save(model, args, n_params, args.steps, history)
     print(f"[{args.arm}] done in {(time.time()-start)/60:.1f} min")
 
 
