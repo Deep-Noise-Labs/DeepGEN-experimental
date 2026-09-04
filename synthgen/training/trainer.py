@@ -85,6 +85,13 @@ class TrainingConfig:
 
     # Model
     vae_latent_dim: int = 64
+    vae_antialias: bool = True
+    """Evaluate Snake activations at an oversampled rate (see docs/ANTIALIASING.md).
+
+    ``False`` reproduces the pre-2026-09 model exactly and exists so the two
+    can be compared; it is not recommended for new runs.
+    """
+    vae_antialias_ratio: int = 2
     dit_model_dim: int = 1024
     dit_num_heads: int = 16
     dit_num_layers: int = 20
@@ -248,6 +255,8 @@ class SynthGenTrainer:
             self.model = AudioVAE(
                 in_channels=config.audio_channels,
                 latent_dim=config.vae_latent_dim,
+                antialias=config.vae_antialias,
+                antialias_ratio=config.vae_antialias_ratio,
             ).to(self.device)
         else:
             self.model = SynthGen(

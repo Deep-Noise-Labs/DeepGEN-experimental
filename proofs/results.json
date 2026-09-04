@@ -1,0 +1,208 @@
+{
+  "depth": {
+    "depth": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      24,
+      32
+    ],
+    "before": [
+      -22.738097463525374,
+      -17.955825445538846,
+      -15.34358662964104,
+      -16.97244111533538,
+      -15.82201935185447,
+      -15.059245345427046,
+      -14.77238976158668
+    ],
+    "after": [
+      -29.077998780963384,
+      -28.95033484892634,
+      -31.203714971883652,
+      -32.16417335439692,
+      -29.193499126327307,
+      -29.513357959363127,
+      -23.218382766351514
+    ],
+    "before_sub": [
+      -58.414977525967664,
+      -45.04542873238154,
+      -30.955303366085687,
+      -29.672124529118328,
+      -27.498392943519953,
+      -25.93267187980547,
+      -25.862387769855324
+    ],
+    "after_sub": [
+      -66.04412768627208,
+      -55.82416995354892,
+      -46.78783825512616,
+      -46.074536152951914,
+      -43.332653652173065,
+      -40.262582017822766,
+      -31.471103912822826
+    ]
+  },
+  "pitch": {
+    "f0": [
+      111.5,
+      223.3,
+      453.1,
+      903.7,
+      1804.1,
+      2090.1,
+      3604.3,
+      4260.9
+    ],
+    "before": [
+      -33.758348134491776,
+      -31.425486445074945,
+      -30.490610299027054,
+      -25.13135100071597,
+      -27.168992969647125,
+      -24.442394395564932,
+      -22.829473627104704,
+      -21.23345800078896
+    ],
+    "after": [
+      -53.02109848423364,
+      -50.38933596300176,
+      -48.5974795267071,
+      -44.92332297309582,
+      -43.731981826594016,
+      -46.36777105462941,
+      -39.44944992261376,
+      -41.854768684649486
+    ]
+  },
+  "sweep": {
+    "sweep_before": {
+      "file": "p3_sweep_before.wav",
+      "seconds": 2.0,
+      "applied_gain_db": -11.01
+    },
+    "sweep_after": {
+      "file": "p3_sweep_after.wav",
+      "seconds": 2.0,
+      "applied_gain_db": -11.08
+    },
+    "sweep_input": {
+      "file": "p3_sweep_input.wav",
+      "seconds": 2.0,
+      "applied_gain_db": 4.61
+    }
+  },
+  "spectrum": {
+    "f0": 2090.1,
+    "before": {
+      "harmonic_power": 111435059.74659966,
+      "inharmonic_power": 2237575.7090451396,
+      "fundamental_db": 76.22793120625056,
+      "worst_spur_db": 52.28905225031015,
+      "worst_spur_hz": 16928.0,
+      "alias_to_signal_db": -16.97244111533538,
+      "sfdr_db": 23.938878955940414,
+      "sub_fundamental_db": -29.672124529118328
+    },
+    "after": {
+      "harmonic_power": 114287938.78883897,
+      "inharmonic_power": 69435.73943289276,
+      "fundamental_db": 76.72606956724951,
+      "worst_spur_db": 37.947376606257606,
+      "worst_spur_hz": 19018.0,
+      "alias_to_signal_db": -32.16417335439692,
+      "sfdr_db": 38.778692960991904,
+      "sub_fundamental_db": -46.074536152951914
+    },
+    "audio_before": {
+      "file": "p4_note_before.wav",
+      "seconds": 0.5,
+      "applied_gain_db": -11.01
+    },
+    "audio_after": {
+      "file": "p4_note_after.wav",
+      "seconds": 0.5,
+      "applied_gain_db": -11.01
+    }
+  },
+  "real_audio": [
+    {
+      "name": "guitar",
+      "source_file": "/home/user/aisynth-vst/assets/guitar.wav",
+      "source": {
+        "file": "p5_guitar_source.wav",
+        "seconds": 2.18,
+        "applied_gain_db": 1.69
+      },
+      "before": {
+        "file": "p5_guitar_before.wav",
+        "seconds": 2.18,
+        "applied_gain_db": 2.55
+      },
+      "after": {
+        "file": "p5_guitar_after.wav",
+        "seconds": 2.18,
+        "applied_gain_db": 2.56
+      },
+      "isolated_alias": {
+        "file": "p5_guitar_isolated_alias.wav",
+        "seconds": 2.18,
+        "applied_gain_db": 36.96
+      },
+      "isolated_alias_level_db": -52.27
+    },
+    {
+      "name": "electronic",
+      "source_file": "/home/user/audiocraft/assets/electronic.mp3",
+      "source": {
+        "file": "p5_electronic_source.wav",
+        "seconds": 2.5,
+        "applied_gain_db": 1.69
+      },
+      "before": {
+        "file": "p5_electronic_before.wav",
+        "seconds": 2.5,
+        "applied_gain_db": -0.33
+      },
+      "after": {
+        "file": "p5_electronic_after.wav",
+        "seconds": 2.5,
+        "applied_gain_db": -0.52
+      },
+      "isolated_alias": {
+        "file": "p5_electronic_isolated_alias.wav",
+        "seconds": 2.5,
+        "applied_gain_db": 13.39
+      },
+      "isolated_alias_level_db": -27.79
+    },
+    {
+      "name": "synth_pad",
+      "source_file": "/home/user/audiocraft/dataset/example/electro_1.mp3",
+      "source": {
+        "file": "p5_synth_pad_source.wav",
+        "seconds": 3.0,
+        "applied_gain_db": 1.69
+      },
+      "before": {
+        "file": "p5_synth_pad_before.wav",
+        "seconds": 3.0,
+        "applied_gain_db": 0.94
+      },
+      "after": {
+        "file": "p5_synth_pad_after.wav",
+        "seconds": 3.0,
+        "applied_gain_db": 0.83
+      },
+      "isolated_alias": {
+        "file": "p5_synth_pad_isolated_alias.wav",
+        "seconds": 3.0,
+        "applied_gain_db": 26.76
+      },
+      "isolated_alias_level_db": -36.06
+    }
+  ]
+}

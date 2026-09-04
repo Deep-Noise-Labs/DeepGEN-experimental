@@ -3,6 +3,10 @@
 
 # Model Architecture
 vae_latent_dim: 64
+# Alias-free Snake activations - see docs/ANTIALIASING.md.
+# false reproduces the pre-2026-09 model exactly (for A/B only).
+vae_antialias: true
+vae_antialias_ratio: 2
 dit_model_dim: 1024
 dit_num_heads: 16
 dit_num_layers: 20
