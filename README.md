@@ -24,6 +24,8 @@ The architecture draws from state-of-the-art research in text-to-audio generatio
 
 **Why Flow Matching over DDPM?** Conditional Flow Matching learns straighter transport paths from noise to data, enabling fewer sampling steps at inference time (as few as 10–25 steps vs. 50–200 for DDPM) while maintaining quality.
 
+**Why alias-free activations?** Snake is a memoryless nonlinearity, so it generates harmonics without bound; at 44.1 kHz everything above Nyquist folds back as inharmonic content that never fuses with the note. Evaluating it inside an oversample/filter/decimate sandwich measures **19.0 dB less aliasing** on average for zero added parameters. See [docs/ANTIALIASING.md](docs/ANTIALIASING.md).
+
 **Why T5-base?** T5-base provides a strong text understanding backbone that has been validated across multiple audio generation systems (Stable Audio, AudioLDM). It balances quality with computational efficiency.
 
 ## Key Features
@@ -42,6 +44,7 @@ synthgen-experimental/
 ├── synthgen/
 │   ├── model/           # Neural network architecture
 │   │   ├── vae.py       # Audio VAE (encoder + decoder)
+│   │   ├── antialias.py # Alias-free activations and resampling
 │   │   ├── dit.py       # Diffusion Transformer
 │   │   ├── text_encoder.py  # T5-based text conditioning
 │   │   └── synthgen.py  # Full model assembly
@@ -53,13 +56,21 @@ synthgen-experimental/
 │   │   ├── trainer.py   # Training loop
 │   │   ├── losses.py    # Loss functions
 │   │   └── scheduler.py # Learning rate schedulers
+│   ├── eval/            # Synth-quality evaluation harness
+│   │   ├── metrics.py   # Alias, transient, stereo, air-band metrics
+│   │   ├── signals.py   # Validated measurement stimuli
+│   │   ├── suite.py     # The quality gates - what "done" means
+│   │   └── cli.py       # synthgen-eval
 │   ├── inference/       # Inference utilities
 │   │   └── generate.py  # Generation pipeline
 │   ├── tracking/        # ClearML (primary) / WandB experiment tracking
 │   └── utils/           # Shared utilities
 │       └── audio.py     # Audio I/O utilities
+├── experiments/         # Reproducible A/B experiments and proof generation
 ├── tests/               # Unit and integration tests
 ├── docs/                # Documentation
+│   ├── EVALUATION.md    # The quality gates and how they are measured
+│   ├── ANTIALIASING.md  # Alias-free synthesis: rationale + measurements
 │   ├── TRAINING.md      # Training guidelines
 │   ├── CLEARML.md       # ClearML setup and upload policy
 │   └── TRITON_INFERENCE.md  # Triton deployment guide
@@ -95,6 +106,23 @@ uv run synthgen-generate --prompt "warm analog pad with slow attack and reverb" 
 ```
 
 Experiment tracking uses **ClearML** as the primary destination. Dataset lineage is registered as a lightweight JSON manifest only — audio is never uploaded to the ClearML fileserver. See [docs/CLEARML.md](docs/CLEARML.md).
+
+## Evaluation
+
+Generic text-to-audio benchmarks (FAD, CLAP) answer "does this resemble real audio". They do not answer "is this clean enough to put in a session" - a sound can score well on them while aliasing audibly, losing its top octave and collapsing to mono. `synthgen.eval` measures the things that decide whether a sample is usable.
+
+```bash
+# What the gates are, and the reasoning behind each threshold
+uv run synthgen-eval gates
+
+# Reference-free: a WAV holding one sustained note
+uv run synthgen-eval synthesis --audio lead.wav --f0 903.7
+
+# Reference-based: a reconstruction against its source
+uv run synthgen-eval reconstruction --pred out.wav --target in.wav --json
+```
+
+Full method, thresholds and known gaps: [docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## Datasets
 
