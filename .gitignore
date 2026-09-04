@@ -47,3 +47,8 @@ output/
 *.mp3
 *.flac
 outputs/
+
+# Local experiment artefacts (regenerate with experiments/generate_proofs.py)
+.venv/
+experiments/out/
+proofs/audio/

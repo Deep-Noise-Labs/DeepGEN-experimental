@@ -2,6 +2,10 @@
 stage: "vae"
 
 vae_latent_dim: 64
+# Alias-free Snake activations - see docs/ANTIALIASING.md.
+# false reproduces the pre-2026-09 model exactly (for A/B only).
+vae_antialias: true
+vae_antialias_ratio: 2
 sample_rate: 44100
 audio_channels: 2
 max_duration: 15.0

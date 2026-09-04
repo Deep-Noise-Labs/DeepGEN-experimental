@@ -39,6 +39,7 @@ download = [
 synthgen-train    = "synthgen.training.trainer:main"
 synthgen-generate = "synthgen.inference.generate:main"
 synthgen-download = "synthgen.data.download:main"
+synthgen-eval     = "synthgen.eval.cli:main"
 
 # ---------------------------------------------------------------------------
 # Dependency groups (PEP 735 / uv native)
