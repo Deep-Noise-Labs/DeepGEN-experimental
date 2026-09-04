@@ -1,4 +1,4 @@
-# AGENTS.md — DeepGEN-experimental
+# AGENTS.md - DeepGEN-experimental
 
 Cross-tool contract for any agent working in this repository, following the
 [agents.md](https://agents.md) convention. Read it in full before writing
@@ -34,22 +34,22 @@ software synth. That target drives everything below.
 - **Separate FACTS from INFERENCES**, and label proposed targets as
   proposed. `docs/EVALUATION.md` names its thresholds as engineering
   targets, not as measured specifications of any third-party product. Keep
-  it that way — inventing a competitor's spec is a factual claim about
+  it that way - inventing a competitor's spec is a factual claim about
   another company.
 - British English. Plain hyphens, never em-dashes, in human-facing copy.
 - Branch and PR for anything non-trivial. Do not push to `main`.
 - Audio used as evidence must come from a real source (AWS S3, a Deep Noise
-  repository, or the AI Synthesizer API) — never synthesised to look like a
+  repository, or the AI Synthesizer API) - never synthesised to look like a
   result. Measurement *stimuli* (sine, sweep, band-limited saw) are a
   different thing and are fine, but label them as stimuli.
 
 ## Read order
 
 1. This file.
-2. `README.md` — architecture overview.
-3. `docs/EVALUATION.md` — **what "done" means**. Read before proposing any
+2. `README.md` - architecture overview.
+3. `docs/EVALUATION.md` - **what "done" means**. Read before proposing any
    quality change; it is the scoring function.
-4. `docs/ANTIALIASING.md` — the first substantive quality change and its
+4. `docs/ANTIALIASING.md` - the first substantive quality change and its
    measured results.
 5. `docs/TRAINING.md`, `docs/CLEARML.md`, `docs/TRITON_INFERENCE.md`.
 
@@ -71,7 +71,7 @@ quantitative rather than aesthetic.
 The repository was a well-structured scaffold with **no evaluation code at
 all** and no trained checkpoints. That is the actual bottleneck: without a
 scoring function, every architecture debate is opinion. So the work split
-in two — build the evals, then use them to justify one change.
+in two - build the evals, then use them to justify one change.
 
 The change: **the decoder's Snake activations were generating aliasing and
 nothing was band-limiting it.** Snake is a memoryless nonlinearity that
@@ -80,7 +80,7 @@ back as inharmonic content, and the decoder applies it ~30 times in series
 with no filtering. For sustained, harmonically-rich synth material this is
 the most audible defect class there is.
 
-Fix: the BigVGAN / Alias-Free-GAN sandwich — upsample ×2, apply Snake,
+Fix: the BigVGAN / Alias-Free-GAN sandwich - upsample ×2, apply Snake,
 low-pass, decimate. **Measured mean improvement: 19.0 dB** alias reduction
 across the pitch range, on the repository's own `ResidualBlock`, with
 identical weights in both arms. Zero added parameters. ~2× compute per
@@ -91,7 +91,7 @@ activation.
 Four mistakes. All four would have produced a confident, wrong report.
 
 **1. I chose test frequencies by eye.** I picked "110.3, 220.5, 440.7,
-2371.3, 4409.1 Hz" — they look irregular, so they look safe. They are not.
+2371.3, 4409.1 Hz" - they look irregular, so they look safe. They are not.
 A folded alias lands at `|k·f0 − n·fs|`, which sits *exactly on top of* a
 real harmonic when `f0` is a simple rational fraction of `fs`. At 44.1 kHz,
 `220.5 Hz` gives `fs/f0 = 200.000` **exactly**, and reports zero aliasing no
@@ -104,7 +104,7 @@ anyone adds a bad frequency. **If you add a test frequency, score it first.**
 
 **2. I used `numpy.blackman` for the analysis window.** That is the 3-term
 Blackman with ~-58 dB sidelobes, which silently caps every alias reading at
--58 dB — right in the range the interesting numbers live. Switching to the
+-58 dB - right in the range the interesting numbers live. Switching to the
 4-term Blackman-Harris moved the measurement floor to about **-93 dB**.
 Guarded by `test_blackman_harris_sidelobes_beat_numpy_blackman`.
 
@@ -120,7 +120,7 @@ connections keep the signal intact and identical weights isolate the
 activation.
 
 **4. A unit test of mine failed for the right reason.** I asserted that a
-sawtooth rolled by 200 samples is "wide" stereo — but the saw's period is
+sawtooth rolled by 200 samples is "wide" stereo - but the saw's period is
 ~100 samples, so the rolled copy is nearly in phase and correlation stays
 ~1. The metric was right; my test signal was wrong.
 
@@ -146,7 +146,7 @@ sawtooth rolled by 200 samples is "wide" stereo — but the saw's period is
 ## Where I would go next, in order
 
 1. **Measure the transposed-convolution upsampler.** `DecoderBlock` uses
-   `ConvTranspose1d(kernel=2·stride, stride=stride)` — the textbook
+   `ConvTranspose1d(kernel=2·stride, stride=stride)` - the textbook
    checkerboard-artefact setup. I deliberately did *not* change it, because
    BigVGAN keeps transposed convs and I had no measurement to justify
    touching it. Get one. This is the most likely next win.
@@ -166,13 +166,13 @@ sawtooth rolled by 200 samples is "wide" stereo — but the saw's period is
 
 - **No GPU** in this sandbox; 4 CPUs, 15 GB RAM.
 - `download.pytorch.org` is **blocked** by egress policy. `pypi.org` is
-  reachable directly — `pip install torch` from PyPI works.
+  reachable directly - `pip install torch` from PyPI works.
 - **AWS was unavailable**: the MCP connector's token was expired and the
   `AWS_ACCESS_KEY_ID` in the environment is stale (`InvalidAccessKeyId`).
   So no S3 sound pulls. `api.deepnoise.ai` is also egress-blocked.
   Real audio therefore came from Deep Noise GitHub repositories. If you
-  need S3, get the connector re-authorised first — do not burn an hour on
+  need S3, get the connector re-authorised first - do not burn an hour on
   it as I did.
 - `deepnoise-web-assets/player/track{1..5}.mp3` are **five identical files**
-  (same md5) — placeholders, not five different tracks. Do not use them as
+  (same md5) - placeholders, not five different tracks. Do not use them as
   a varied corpus.
