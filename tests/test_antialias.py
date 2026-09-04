@@ -120,3 +120,38 @@ def test_alpha_is_reachable_on_the_wrapper():
     """Checkpoint remapping depends on alpha staying addressable."""
     act = AntiAliasedSnake(16)
     assert act.alpha.shape == (1, 16, 1)
+
+
+def test_filters_stay_out_of_the_state_dict():
+    """
+    Non-persistent buffers keep checkpoints interchangeable between the two
+    activations - only ``alpha`` is stored, so a Snake checkpoint remains
+    remappable and parameter counts stay comparable.
+    """
+    keys = list(AntiAliasedSnake(4).state_dict().keys())
+    assert keys == ["act.activation.alpha"]
+
+
+def test_short_sequences_do_not_crash():
+    """
+    Replicate padding refuses pads wider than the input, so very short
+    latents are a real failure mode for a filtered activation.
+    """
+    for n in (1, 2, 4, 5, 8, 64):
+        x = torch.randn(1, 3, n)
+        assert AntiAliasedSnake(3, ratio=2)(x).shape == x.shape
+
+
+def test_gradient_reaches_alpha():
+    act = AntiAliasedSnake(4)
+    act(torch.randn(1, 4, 256)).sum().backward()
+    assert act.alpha.grad is not None
+    assert torch.isfinite(act.alpha.grad).all()
+
+
+def test_runs_under_bf16_autocast():
+    """Training config defaults to bf16; the filters must survive it."""
+    act = AntiAliasedSnake(4)
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        out = act(torch.randn(1, 4, 512))
+    assert torch.isfinite(out.float()).all()
