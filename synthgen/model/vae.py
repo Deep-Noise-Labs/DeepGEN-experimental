@@ -17,6 +17,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from synthgen.model.resample import BandlimitedDownsample1d, BandlimitedUpsample1d
+
 
 # =============================================================================
 # Activation Functions
@@ -79,7 +81,12 @@ class ResidualBlock(nn.Module):
 
 
 class EncoderBlock(nn.Module):
-    """Encoder block: residual layers followed by downsampling."""
+    """Encoder block: residual layers followed by downsampling.
+
+    ``bandlimited`` inserts a fixed anti-alias low-pass before the strided
+    convolution decimates. Without it, content above the post-decimation
+    Nyquist folds back as inharmonic noise; see ``synthgen/model/resample.py``.
+    """
 
     def __init__(
         self,
@@ -88,6 +95,7 @@ class EncoderBlock(nn.Module):
         stride: int = 4,
         num_residual: int = 3,
         dilations: tuple = (1, 3, 9),
+        bandlimited: bool = True,
     ):
         super().__init__()
 
@@ -98,16 +106,20 @@ class EncoderBlock(nn.Module):
         ])
 
         # Downsampling via strided convolution
-        self.downsample = nn.Sequential(
-            Snake(in_channels),
-            nn.Conv1d(
+        if bandlimited:
+            resampler = BandlimitedDownsample1d(in_channels, out_channels, stride)
+            conv = resampler.conv
+        else:
+            resampler = nn.Conv1d(
                 in_channels, out_channels,
                 kernel_size=stride * 2,
                 stride=stride,
                 padding=stride // 2,
-            ),
-        )
-        self.downsample[1] = nn.utils.parametrizations.weight_norm(self.downsample[1])
+            )
+            conv = resampler
+
+        self.downsample = nn.Sequential(Snake(in_channels), resampler)
+        nn.utils.parametrizations.weight_norm(conv)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.residual_layers(x)
@@ -116,7 +128,14 @@ class EncoderBlock(nn.Module):
 
 
 class DecoderBlock(nn.Module):
-    """Decoder block: upsampling followed by residual layers."""
+    """Decoder block: upsampling followed by residual layers.
+
+    ``bandlimited`` inserts a fixed anti-imaging low-pass between the
+    zero-stuffing and the learnable kernel of the transposed convolution.
+    Without it the stage emits spectral images -- inharmonic mirror copies of
+    the signal -- that no downstream layer can remove; see
+    ``synthgen/model/resample.py``.
+    """
 
     def __init__(
         self,
@@ -125,20 +144,23 @@ class DecoderBlock(nn.Module):
         stride: int = 4,
         num_residual: int = 3,
         dilations: tuple = (1, 3, 9),
+        bandlimited: bool = True,
     ):
         super().__init__()
 
         # Upsampling via transposed convolution
-        self.upsample = nn.Sequential(
-            Snake(in_channels),
-            nn.ConvTranspose1d(
+        if bandlimited:
+            resampler = BandlimitedUpsample1d(in_channels, out_channels, stride)
+        else:
+            resampler = nn.ConvTranspose1d(
                 in_channels, out_channels,
                 kernel_size=stride * 2,
                 stride=stride,
                 padding=stride // 2,
-            ),
-        )
-        self.upsample[1] = nn.utils.parametrizations.weight_norm(self.upsample[1])
+            )
+
+        self.upsample = nn.Sequential(Snake(in_channels), resampler)
+        nn.utils.parametrizations.weight_norm(resampler)
 
         # Residual layers
         self.residual_layers = nn.Sequential(*[
@@ -176,10 +198,12 @@ class AudioEncoder(nn.Module):
         channel_multipliers: tuple = (1, 2, 4, 8),
         strides: tuple = (4, 4, 8, 8),
         num_residual_per_block: int = 3,
+        bandlimited: bool = True,
     ):
         super().__init__()
 
         self.in_channels = in_channels
+        self.bandlimited = bandlimited
         self.latent_dim = latent_dim
 
         # Compute compression ratio
@@ -203,6 +227,7 @@ class AudioEncoder(nn.Module):
                     out_channels=out_channels,
                     stride=stride,
                     num_residual=num_residual_per_block,
+                    bandlimited=bandlimited,
                 )
             )
             current_channels = out_channels
@@ -260,10 +285,12 @@ class AudioDecoder(nn.Module):
         channel_multipliers: tuple = (8, 4, 2, 1),
         strides: tuple = (8, 8, 4, 4),
         num_residual_per_block: int = 3,
+        bandlimited: bool = True,
     ):
         super().__init__()
 
         self.out_channels = out_channels
+        self.bandlimited = bandlimited
         self.latent_dim = latent_dim
 
         # Input projection from latent
@@ -293,6 +320,7 @@ class AudioDecoder(nn.Module):
                     out_channels=out_ch,
                     stride=stride,
                     num_residual=num_residual_per_block,
+                    bandlimited=bandlimited,
                 )
             )
             current_channels = out_ch
@@ -346,10 +374,12 @@ class AudioVAE(nn.Module):
         decoder_channel_multipliers: tuple = (8, 4, 2, 1),
         strides: tuple = (4, 4, 8, 8),
         num_residual_per_block: int = 3,
+        bandlimited: bool = True,
     ):
         super().__init__()
 
         self.latent_dim = latent_dim
+        self.bandlimited = bandlimited
         self.compression_ratio = 1
         for s in strides:
             self.compression_ratio *= s
@@ -361,6 +391,7 @@ class AudioVAE(nn.Module):
             channel_multipliers=encoder_channel_multipliers,
             strides=strides,
             num_residual_per_block=num_residual_per_block,
+            bandlimited=bandlimited,
         )
 
         self.decoder = AudioDecoder(
@@ -370,6 +401,7 @@ class AudioVAE(nn.Module):
             channel_multipliers=decoder_channel_multipliers,
             strides=tuple(reversed(strides)),
             num_residual_per_block=num_residual_per_block,
+            bandlimited=bandlimited,
         )
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
